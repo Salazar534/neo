@@ -80,6 +80,34 @@ fs_ops = [
 for name, desc, params in fs_ops:
     add(name, desc, params, "fs", name)
 
+# PC-native agency
+pc_ops = [
+    ("pc_search", "Search Desktop/Documents/Downloads/Home/cwd by file name or text", {
+        "query": {"type": "string", "required": True},
+        "scope": {"type": "string", "enum": ["desktop", "documents", "downloads", "home", "cwd", "workspace"], "default": "cwd"},
+        "kind": {"type": "string", "enum": ["name", "text"], "default": "name"},
+        "limit": {"type": "integer", "default": 80},
+    }),
+    ("pc_create", "Create a folder or file on Desktop/Documents/Downloads/Home/cwd", {
+        "path": {"type": "string", "required": True},
+        "scope": {"type": "string", "enum": ["desktop", "documents", "downloads", "home", "cwd", "workspace"], "default": "desktop"},
+        "content": {"type": "string"},
+        "directory": {"type": "boolean", "default": False},
+    }),
+    ("browser_open", "Open a URL or local HTML file in the default browser", {
+        "url": {"type": "string"},
+        "path": {"type": "string"},
+    }),
+    ("preview_server", "Serve a folder over localhost and optionally open the browser", {
+        "path": {"type": "string", "default": "."},
+        "port": {"type": "integer", "default": 8767},
+        "open": {"type": "boolean", "default": True},
+        "action": {"type": "string", "enum": ["start", "stop"], "default": "start"},
+    }),
+]
+for name, desc, params in pc_ops:
+    add(name, desc, params, "win", name)
+
 # agent / project
 agent_ops = [
     ("project_set_root", "Set Neo project workspace root (relative paths resolve here)", {"path": {"type": "string", "required": True}}),
@@ -225,7 +253,7 @@ search_presets = [
     "websocket scaling", "ffmpeg compress video", "imagemagick convert", "git rebase guide",
     "rust ownership", "go concurrency", "c# linq", "typescript utility types", "css grid",
     "tailwind components", "nextjs app router", "vite config", "electron security", "tauri vs electron",
-    "local llm tools", "ollama tool calling", "comfyui flux", "stable diffusion turbo",
+    "local llm tools", "local agent tool calling", "comfyui flux", "local image turbo models",
     "windows registry tips", "winget packages", "chocolatey packages", "scoop buckets",
     "wsl2 gpu", "cuda pytorch blackwell", "rtx 5070 ai", "mcp server install", "cursor rules",
     "playwright scraping", "selenium stealth", "beautifulsoup selectors", "regex cookbook",
@@ -335,11 +363,8 @@ mcp_ops = [
     ("mcp_list_local", "List MCP-ish configs under .cursor or neo/mcp", {"root": {"type": "string", "default": "."}}),
     ("mcp_install_npm", "Install an MCP server package via npm", {"package": {"type": "string", "required": True}, "cwd": {"type": "string", "default": "."}}),
     ("mcp_write_config", "Write/merge an MCP server config JSON snippet", {"path": {"type": "string", "required": True}, "name": {"type": "string", "required": True}, "command": {"type": "string", "required": True}, "args": {"type": "array", "items": {"type": "string"}, "default": []}}),
-    ("model_ollama_list", "List local Ollama models", {}),
-    ("model_ollama_pull", "Pull an Ollama model", {"name": {"type": "string", "required": True}}),
-    ("model_ollama_run_prompt", "Quick completion with another Ollama model", {"model": {"type": "string", "required": True}, "prompt": {"type": "string", "required": True}}),
-    ("model_switch_text", "Switch Neo text model for this session", {"model": {"type": "string", "required": True}}),
-    ("model_capabilities", "Describe available model capabilities Neo can call", {}),
+    ("model_switch_text", "Switch Neo text model id for this session (neo-brain / neo-coder)", {"model": {"type": "string", "required": True}}),
+    ("model_capabilities", "Describe Neo local model capabilities", {}),
 ]
 for name, desc, params in mcp_ops:
     add(name, desc, params, "mcp", name)

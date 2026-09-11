@@ -11,8 +11,19 @@
 import { pathToFileURL } from "node:url";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawn } from "node:child_process";
-import { writePackageRootMarker, resolvePython, PACKAGE_ROOT, loadConfig, DEFAULT_BRAIN_PORT } from "./paths.mjs";
+import { spawn, spawnSync } from "node:child_process";
+import readline from "node:readline/promises";
+import { stdin as input, stdout as output } from "node:process";
+import {
+  writePackageRootMarker,
+  resolvePython,
+  PACKAGE_ROOT,
+  loadConfig,
+  DEFAULT_BRAIN_PORT,
+  neoBrainInstalled,
+  formatBytes,
+  neoInstallSizePlan,
+} from "./paths.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
@@ -25,7 +36,47 @@ if (!process.env.NEO_WORKSPACE) {
 
 writePackageRootMarker();
 
+/** First-run: offer full model install when Neo Brain is missing. */
+async function maybePromptInstallModels() {
+  if (neoBrainInstalled()) return;
+  if (process.env.NEO_SKIP_INSTALL_PROMPT === "1") return;
+  if (!process.stdin.isTTY) {
+    console.error("Neo models missing. Run: neo install");
+    process.exit(1);
+  }
+  const plan = neoInstallSizePlan({ skipImage: false });
+  console.log(`
+  NEO models not found yet.
+
+  Full foundational bundle (~${formatBytes(plan.totalDownloadBytes)} download):
+    Neo Brain  ·  Neo Code (hardlink)  ·  Neo Vision  ·  brain runtime
+
+  Run install now? [Y/n]
+`);
+  const rl = readline.createInterface({ input, output });
+  let ans = "y";
+  try {
+    ans = (await rl.question("  › ")).trim().toLowerCase();
+  } finally {
+    rl.close();
+  }
+  if (ans === "n" || ans === "no") {
+    console.log("  Skipped. Later: neo install");
+    process.exit(0);
+  }
+  const r = spawnSync(process.execPath, [path.join(here, "install.mjs")], {
+    stdio: "inherit",
+    windowsHide: true,
+  });
+  if (r.status) process.exit(r.status || 1);
+  if (!neoBrainInstalled()) {
+    console.error("Install did not complete. Retry: neo install");
+    process.exit(1);
+  }
+}
+
 async function launchUi() {
+  await maybePromptInstallModels();
   const wantInk = process.env.NEO_INK === "1";
   let useInk = false;
   if (wantInk) {
@@ -44,25 +95,27 @@ async function launchUi() {
 }
 
 function help() {
-  console.log(`NEO — local agent OS (no Ollama required)
+  console.log(`NEO — fully local coding agent
 
 Usage:
   neo              Start the agent UI
-  neo install      Download Neo model + brain runtime
-  neo doctor       Check GPU/CPU, model, PATH, daemons
-  neo brain        Run brain daemon (foreground)
+  neo install      Download ALL Neo models + brain runtime (with progress)
+  neo doctor       Check models, PATH, API/daemons
+  neo repair       Fix stale neo.cmd / PATH (WinGet EPERM/EEXIST)
+  neo brain        Run Neo API/brain daemon (foreground)
   neo help         Show this help
 
-Install (world-wide):
-  npm install -g @node30/neo
-  neo install
-  neo
+Install:
+  npm install -g @node30/neo && neo install
+  # until published:
+  npm install -g github:Salazar534/neo --force && neo install
 
 Env:
   NEO_WORKSPACE     file write root (default: cwd)
-  NEO_USE_OLLAMA=1  optional Ollama fallback
-  NEO_BRAIN_PORT    default 8766
-  NEO_N_GPU_LAYERS  llama.cpp GPU layers (-1=all, 0=CPU)
+  NEO_BRAIN_PORT    API port (default 8766)
+  NEO_N_GPU_LAYERS  GPU layers (-1=all, 0=CPU)
+  NEO_N_CTX         context window (default 16384)
+  NEO_INSTALL_MODELS=1   postinstall runs neo install
 `);
 }
 
@@ -85,10 +138,11 @@ if (["-h", "--help", "help"].includes(cmd)) {
   await import(pathToFileURL(path.join(here, "install.mjs")).href);
 } else if (cmd === "doctor") {
   await import(pathToFileURL(path.join(here, "doctor.mjs")).href);
+} else if (cmd === "repair" || cmd === "fix-path") {
+  await import(pathToFileURL(path.join(here, "fix-path.mjs")).href);
 } else if (cmd === "brain" || cmd === "serve") {
   await runBrainFg();
 } else if (!cmd || cmd.startsWith("-") || cmd === "ui" || cmd === "chat") {
-  // bare `neo` or unknown flags → UI (pass remaining as unused for now)
   await launchUi();
 } else {
   console.error(`Unknown command: ${cmd}`);

@@ -585,6 +585,133 @@
       }
     },
     {
+      "name": "pc_search",
+      "description": "Search Desktop/Documents/Downloads/Home/cwd by file name or text",
+      "category": "win",
+      "handler": "pc_search",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "desktop",
+              "documents",
+              "downloads",
+              "home",
+              "cwd",
+              "workspace"
+            ],
+            "default": "cwd"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "name",
+              "text"
+            ],
+            "default": "name"
+          },
+          "limit": {
+            "type": "integer",
+            "default": 80
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "pc_create",
+      "description": "Create a folder or file on Desktop/Documents/Downloads/Home/cwd",
+      "category": "win",
+      "handler": "pc_create",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "desktop",
+              "documents",
+              "downloads",
+              "home",
+              "cwd",
+              "workspace"
+            ],
+            "default": "desktop"
+          },
+          "content": {
+            "type": "string"
+          },
+          "directory": {
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    {
+      "name": "browser_open",
+      "description": "Open a URL or local HTML file in the default browser",
+      "category": "win",
+      "handler": "browser_open",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "preview_server",
+      "description": "Serve a folder over localhost and optionally open the browser",
+      "category": "win",
+      "handler": "preview_server",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "default": "."
+          },
+          "port": {
+            "type": "integer",
+            "default": 8767
+          },
+          "open": {
+            "type": "boolean",
+            "default": true
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "start",
+              "stop"
+            ],
+            "default": "start"
+          }
+        },
+        "required": []
+      }
+    },
+    {
       "name": "project_set_root",
       "description": "Set Neo project workspace root (relative paths resolve here)",
       "category": "agent",
@@ -5602,7 +5729,7 @@
     },
     {
       "name": "web_preset_search_25",
-      "description": "Web search preset: ollama tool calling",
+      "description": "Web search preset: local agent tool calling",
       "category": "web",
       "handler": "web_search_preset",
       "parameters": {
@@ -5610,7 +5737,7 @@
         "properties": {},
         "required": []
       },
-      "query": "ollama tool calling"
+      "query": "local agent tool calling"
     },
     {
       "name": "web_preset_search_26",
@@ -5626,7 +5753,7 @@
     },
     {
       "name": "web_preset_search_27",
-      "description": "Web search preset: stable diffusion turbo",
+      "description": "Web search preset: local image turbo models",
       "category": "web",
       "handler": "web_search_preset",
       "parameters": {
@@ -5634,7 +5761,7 @@
         "properties": {},
         "required": []
       },
-      "query": "stable diffusion turbo"
+      "query": "local image turbo models"
     },
     {
       "name": "web_preset_search_28",
@@ -8519,57 +8646,8 @@
       }
     },
     {
-      "name": "model_ollama_list",
-      "description": "List local Ollama models",
-      "category": "mcp",
-      "handler": "model_ollama_list",
-      "parameters": {
-        "type": "object",
-        "properties": {},
-        "required": []
-      }
-    },
-    {
-      "name": "model_ollama_pull",
-      "description": "Pull an Ollama model",
-      "category": "mcp",
-      "handler": "model_ollama_pull",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "name": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "name"
-        ]
-      }
-    },
-    {
-      "name": "model_ollama_run_prompt",
-      "description": "Quick completion with another Ollama model",
-      "category": "mcp",
-      "handler": "model_ollama_run_prompt",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "model": {
-            "type": "string"
-          },
-          "prompt": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "model",
-          "prompt"
-        ]
-      }
-    },
-    {
       "name": "model_switch_text",
-      "description": "Switch Neo text model for this session",
+      "description": "Switch Neo text model id for this session (neo-brain / neo-coder)",
       "category": "mcp",
       "handler": "model_switch_text",
       "parameters": {
@@ -8586,7 +8664,7 @@
     },
     {
       "name": "model_capabilities",
-      "description": "Describe available model capabilities Neo can call",
+      "description": "Describe Neo local model capabilities",
       "category": "mcp",
       "handler": "model_capabilities",
       "parameters": {
@@ -15230,22 +15308,6 @@
           "message": {
             "type": "string",
             "default": "neo-util-415"
-          }
-        },
-        "required": []
-      }
-    },
-    {
-      "name": "util_echo_0416",
-      "description": "Utility echo tool #416 \u2014 returns args (for agent self-tests).",
-      "category": "util",
-      "handler": "util_echo",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "message": {
-            "type": "string",
-            "default": "neo-util-416"
           }
         },
         "required": []

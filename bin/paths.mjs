@@ -43,44 +43,137 @@ export function neoRootMarkerPath() {
 /**
  * Neo-branded model assets.
  * upstream_* fields are fetch mirrors only — never shown as product names.
+ *
+ * Modes Neo Plan / Neo Code / Neo Work all run on neo-brain.gguf (one GGUF).
+ * neo-coder.gguf is the same weights under a role name (hardlink when possible).
+ * Neo Vision = local image weights under models/neo-image/.
  */
 export const NEO_MODELS = {
   brain: {
     id: "neo-brain",
+    brand: "Neo Brain",
+    modes: ["Neo Plan", "Neo Code", "Neo Work"],
     file: "neo-brain.gguf",
     required: true,
     kind: "gguf",
     n_ctx: 16384,
-    // upstream mirror (Hugging Face) — download only; local name is Neo-branded
+    // upstream mirror — download only; local name is Neo-branded
     upstream_repo: "unsloth/Qwen2.5-Coder-3B-Instruct-GGUF",
     upstream_file: "Qwen2.5-Coder-3B-Instruct-Q4_K_M.gguf",
+    approx_bytes: 1_930_000_000,
     approx_mb: 1930,
-    description: "Primary Neo text/coding brain",
+    download: true,
+    description: "Primary Neo text brain (powers Plan / Code / Work modes)",
   },
   coder: {
     id: "neo-coder",
+    brand: "Neo Code",
     file: "neo-coder.gguf",
     required: true,
     kind: "gguf",
-    // Same capable coding weights; stored under Neo name for role clarity
     upstream_repo: "unsloth/Qwen2.5-Coder-3B-Instruct-GGUF",
     upstream_file: "Qwen2.5-Coder-3B-Instruct-Q4_K_M.gguf",
-    // If brain already downloaded, install may hardlink/copy instead of re-fetch
+    // Same GGUF as brain; install hardlinks/copies instead of re-fetch
     alias_of: "brain",
+    approx_bytes: 1_930_000_000,
     approx_mb: 1930,
-    description: "Neo coding specialist weights",
+    download: false,
+    description: "Neo Code role weights (same file as Neo Brain; hardlink when possible)",
   },
   image: {
-    id: "neo-image",
+    id: "neo-vision",
+    brand: "Neo Vision",
     dir: "neo-image",
     required: true,
     kind: "diffusers",
-    // upstream mirror for image pipeline weights
+    // upstream mirror for image pipeline; install pulls fp16 diffusers layout only
     upstream_repo: "stabilityai/sd-turbo",
-    approx_mb: 3200,
-    description: "Neo local image generation weights",
+    approx_bytes: 2_600_000_000,
+    approx_mb: 2600,
+    download: true,
+    description: "Neo Vision — local image generation weights",
   },
 };
+
+/** Approx pip/runtime footprint (brain + vision deps). Not model weights. */
+export const NEO_RUNTIME_APPROX = {
+  brain_pip_mb: 120,
+  vision_pip_mb: 1800,
+  description: "Python venv: llama-cpp + (optional) torch/diffusers for Neo Vision",
+};
+
+/**
+ * Bundle size plan for neo install (download vs disk).
+ * @param {{ skipImage?: boolean }} [opts]
+ */
+export function neoInstallSizePlan(opts = {}) {
+  const skipImage = Boolean(opts.skipImage);
+  const brain = NEO_MODELS.brain;
+  const coder = NEO_MODELS.coder;
+  const image = NEO_MODELS.image;
+  const assets = [
+    {
+      key: "brain",
+      brand: brain.brand,
+      pathName: brain.file,
+      role: "Neo Plan · Neo Code · Neo Work (shared GGUF)",
+      downloadBytes: brain.approx_bytes,
+      diskBytes: brain.approx_bytes,
+      note: "one download",
+    },
+    {
+      key: "coder",
+      brand: coder.brand,
+      pathName: coder.file,
+      role: "Neo Code role file (alias of Neo Brain)",
+      downloadBytes: 0,
+      diskBytes: 0,
+      note: "hardlink ≈ 0 extra disk; copy ≈ +" + formatBytes(coder.approx_bytes) + " if hardlink fails",
+    },
+  ];
+  if (!skipImage) {
+    assets.push({
+      key: "image",
+      brand: image.brand,
+      pathName: image.dir + "/",
+      role: "Local image generation",
+      downloadBytes: image.approx_bytes,
+      diskBytes: image.approx_bytes,
+      note: "fp16 pipeline weights",
+    });
+  }
+  const runtimeMb =
+    NEO_RUNTIME_APPROX.brain_pip_mb + (skipImage ? 0 : NEO_RUNTIME_APPROX.vision_pip_mb);
+  const downloadBytes = assets.reduce((s, a) => s + a.downloadBytes, 0);
+  const diskBytes = assets.reduce((s, a) => s + a.diskBytes, 0);
+  return {
+    assets,
+    modelsDownloadBytes: downloadBytes,
+    modelsDiskBytes: diskBytes,
+    runtimeApproxBytes: runtimeMb * 1_000_000,
+    totalDownloadBytes: downloadBytes + runtimeMb * 1_000_000,
+    totalDiskBytes: diskBytes + runtimeMb * 1_000_000,
+    skipImage,
+  };
+}
+
+export function formatBytes(n) {
+  const x = Number(n) || 0;
+  if (x >= 1e9) return `${(x / 1e9).toFixed(2)} GB`;
+  if (x >= 1e6) return `${(x / 1e6).toFixed(0)} MB`;
+  if (x >= 1e3) return `${(x / 1e3).toFixed(0)} KB`;
+  return `${x} B`;
+}
+
+/** True when neo-brain.gguf is present and usable. */
+export function neoBrainInstalled() {
+  const brain = path.join(neoModelsDir(), NEO_MODELS.brain.file);
+  try {
+    return fs.existsSync(brain) && fs.statSync(brain).size > 1_000_000;
+  } catch {
+    return false;
+  }
+}
 
 /** @deprecated use NEO_MODELS.brain — kept for older scripts */
 export const DEFAULT_MODEL = {

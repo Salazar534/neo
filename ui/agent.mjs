@@ -7,9 +7,12 @@ import {
   pyExec,
   systemPrompt,
   ensureBrainDaemonSilent,
+  createConversation,
+  persistMessage,
 } from "./lib.mjs";
 
-const HOP_BUDGET = 48;
+const HOP_BUDGET_DEFAULT = 48;
+const HOP_BUDGET_PLAN = 72;
 const TOOL_RESULT_MAX = 24000;
 const HISTORY_COMPACT_AFTER = 28;
 const COMPACT_TOOL_MAX = 2500;
@@ -42,6 +45,8 @@ function noteFromResult(name, result) {
   if (!d) return null;
   if (typeof d === "object") {
     if (d.path) return String(d.path) + (d.bytes != null ? ` (${d.bytes}b)` : "");
+    if (d.url) return String(d.url);
+    if (d.hits) return `hits: ${d.count ?? d.hits.length}`;
     if (d.files && Array.isArray(d.files) && d.applied != null) return `patched ${d.applied} file(s)`;
     if (d.items && d.pending != null) return `todos: ${d.pending} pending`;
     if (d.count != null && d.files) return `map: ${d.count} files`;
@@ -56,15 +61,35 @@ export async function runAgentTurn({
   mode,
   model,
   userText,
+  conversationId,
   onNote,
   onBusy,
   onReply,
 }) {
-  ensureBrainDaemonSilent();
+  await ensureBrainDaemonSilent();
   messages[0] = { role: "system", content: systemPrompt(mode, model) };
   messages.push({ role: "user", content: userText });
 
-  for (let hop = 0; hop < HOP_BUDGET; hop++) {
+  let cid = conversationId;
+  if (!cid) {
+    try {
+      const created = await createConversation({ mode, model });
+      cid = created.conversation?.id;
+    } catch {
+      /* persistence optional if daemon loading */
+    }
+  }
+  if (cid) {
+    try {
+      await persistMessage(cid, "user", userText);
+    } catch {
+      /* */
+    }
+  }
+
+  const hopBudget = mode === "plan" ? HOP_BUDGET_PLAN : HOP_BUDGET_DEFAULT;
+
+  for (let hop = 0; hop < hopBudget; hop++) {
     onBusy?.(hop === 0 ? "…" : `hop ${hop}`);
     compactHistory(messages);
     let data;
@@ -76,6 +101,15 @@ export async function runAgentTurn({
     }
     const msg = data.message || {};
     messages.push(msg);
+    if (cid) {
+      try {
+        await persistMessage(cid, "assistant", msg.content || "", {
+          tool_calls: msg.tool_calls || null,
+        });
+      } catch {
+        /* */
+      }
+    }
     const calls = msg.tool_calls || [];
     if (!calls.length) {
       const content = (msg.content || "").trim();
@@ -102,14 +136,23 @@ export async function runAgentTurn({
       else if (name !== "set_mode" && name !== "search_tools" && name !== "get_status" && !result?.ok) {
         onNote?.(`${name}: ${result?.error || "fail"}`);
       }
+      const toolContent = truncateResult(result);
       messages.push({
         role: "tool",
         tool_name: name,
-        content: truncateResult(result),
+        content: toolContent,
       });
+      if (cid) {
+        try {
+          await persistMessage(cid, "tool", toolContent, { tool_name: name });
+        } catch {
+          /* */
+        }
+      }
     }
   }
   onBusy?.("");
+  return { conversationId: cid };
 }
 
-export { HOP_BUDGET, META_TOOLS };
+export { HOP_BUDGET_DEFAULT as HOP_BUDGET, META_TOOLS };

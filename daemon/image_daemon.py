@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Warm NEO image daemon — keeps SD-Turbo loaded for fast generations."""
+"""Warm NEO image daemon — keeps Neo Vision weights loaded for fast generations."""
 
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -16,6 +17,45 @@ OUT.mkdir(parents=True, exist_ok=True)
 PIPE = None
 LOCK = threading.Lock()
 DEVICE = "cpu"
+MODEL_ID = "neo-vision"
+
+
+def _neo_data_root() -> Path:
+    try:
+        from neo_paths import data_root as _dr
+
+        return _dr()
+    except Exception:
+        pass
+    env = os.environ.get("NEO_HOME")
+    if env:
+        return Path(env)
+    if os.name == "nt":
+        base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
+        return Path(base) / "Neo"
+    import sys
+
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "Neo"
+    return Path.home() / ".local" / "share" / "neo"
+
+
+def resolve_image_model():
+    """Prefer local Neo Vision weights under models/neo-image."""
+    cfg_path = _neo_data_root() / "config.json"
+    if cfg_path.is_file():
+        try:
+            cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+            p = cfg.get("image_path")
+            if p and Path(p).is_dir() and (Path(p) / ".neo-ready").is_file():
+                return Path(p)
+        except Exception:
+            pass
+    local = _neo_data_root() / "models" / "neo-image"
+    if local.is_dir() and (local / ".neo-ready").is_file():
+        return local
+    # Fallback: upstream mirror id (first run / missing install) — not a product name
+    return "stabilityai/sd-turbo"
 
 
 def load_pipeline():
@@ -25,18 +65,18 @@ def load_pipeline():
 
     DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = torch.float16 if DEVICE == "cuda" else torch.float32
-    print(f"[neo-image] loading sd-turbo on {DEVICE}…", flush=True)
+    model_src = resolve_image_model()
+    print(f"[neo-vision] loading {MODEL_ID} from {model_src} on {DEVICE}…", flush=True)
     t0 = time.time()
-    pipe = AutoPipelineForText2Image.from_pretrained(
-        "stabilityai/sd-turbo",
-        torch_dtype=dtype,
-        variant="fp16" if DEVICE == "cuda" else None,
-    )
+    kwargs = {"torch_dtype": dtype}
+    if DEVICE == "cuda" and not isinstance(model_src, Path):
+        kwargs["variant"] = "fp16"
+    pipe = AutoPipelineForText2Image.from_pretrained(str(model_src), **kwargs)
     pipe = pipe.to(DEVICE)
     if hasattr(pipe, "set_progress_bar_config"):
         pipe.set_progress_bar_config(disable=True)
     PIPE = pipe
-    print(f"[neo-image] ready in {time.time() - t0:.1f}s", flush=True)
+    print(f"[neo-vision] ready in {time.time() - t0:.1f}s", flush=True)
 
 
 def generate(payload: dict) -> dict:
@@ -48,7 +88,6 @@ def generate(payload: dict) -> dict:
     steps = max(1, min(int(payload.get("steps") or 4), 8))
     exact = str(payload.get("exact_text") or "")
 
-    # snap to multiples of 8
     width -= width % 8
     height -= height % 8
 
@@ -86,12 +125,13 @@ def generate(payload: dict) -> dict:
         "steps": steps,
         "size": [width, height],
         "exact_text": exact or None,
+        "model": MODEL_ID,
     }
 
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
-        print("[neo-image]", fmt % args, flush=True)
+        print("[neo-vision]", fmt % args, flush=True)
 
     def _json(self, code: int, obj: dict):
         body = json.dumps(obj).encode()
@@ -103,7 +143,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path.startswith("/health"):
-            self._json(200, {"ok": True, "ready": PIPE is not None, "device": DEVICE})
+            self._json(200, {"ok": True, "ready": PIPE is not None, "device": DEVICE, "model": MODEL_ID})
             return
         self._json(404, {"ok": False, "error": "not found"})
 
@@ -125,9 +165,9 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     load_pipeline()
-    host, port = "127.0.0.1", int(__import__("os").environ.get("NEO_IMAGE_PORT", "8765"))
+    host, port = "127.0.0.1", int(os.environ.get("NEO_IMAGE_PORT", "8765"))
     httpd = ThreadingHTTPServer((host, port), Handler)
-    print(f"[neo-image] listening http://{host}:{port}", flush=True)
+    print(f"[neo-vision] listening http://{host}:{port}", flush=True)
     httpd.serve_forever()
 
 

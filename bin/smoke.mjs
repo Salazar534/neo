@@ -18,6 +18,7 @@ function call(tool, args = {}, expectOk = true) {
     encoding: "utf8",
     env: process.env,
     cwd: smokeDir,
+    windowsHide: true,
   });
   let out;
   try {
@@ -115,6 +116,14 @@ call("code_scaffold_sql_schema", { path: "schema.sql", table: "widgets" });
 call("set_mode", { mode: "plan" });
 call("set_mode", { mode: "work" });
 call("model_capabilities", {});
+
+// PC agency + preview
+call("pc_create", { path: "NeoSmokeFolder", scope: "cwd", directory: true });
+call("pc_search", { query: "NeoSmoke", scope: "cwd", kind: "name" });
+call("fs_write", { path: "preview.html", content: "<html><body>neo</body></html>" });
+const prev = call("preview_server", { path: ".", port: 18768, open: false });
+if (!prev.data?.url) throw new Error("preview_server missing url");
+call("preview_server", { port: 18768, action: "stop", open: false });
 
 console.log("\nSMOKE PASS");
 console.log("dir", smokeDir);

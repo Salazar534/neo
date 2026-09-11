@@ -1,0 +1,8 @@
+# Neo Vision runtime (local image generation). Pulled by `neo install` unless --skip-image.
+# torch is large (~1–2 GB); omit with: neo install --skip-image
+diffusers>=0.27.0
+transformers>=4.40.0
+accelerate>=0.30.0
+safetensors>=0.4.0
+pillow>=10.0.0
+torch

@@ -8,11 +8,19 @@ import {
   ensureBrainDaemonSilent,
   ensureCatalog,
   ensureImageDaemonSilent,
+  modeName,
+  modePromptLabel,
+  modesHintLine,
+  openWorkspaceConversation,
   pyExec,
   readState,
   startVoice,
   systemPrompt,
   writeState,
+  listConversations,
+  loadConversation,
+  chatToAgentMessages,
+  chatMessagesToFeed,
 } from "./lib.mjs";
 
 if (!process.env.NEO_WORKSPACE) process.env.NEO_WORKSPACE = process.cwd();
@@ -36,15 +44,15 @@ function Badge({ label, tone = "accent" }) {
 
 function ModePicker({ onPick }) {
   const items = [
-    { label: "plan", value: "plan" },
-    { label: "code", value: "code" },
-    { label: "work", value: "work" },
+    { label: "Neo Plan", value: "plan" },
+    { label: "Neo Code", value: "code" },
+    { label: "Neo Work", value: "work" },
   ];
   return h(
     Box,
     { flexDirection: "column", paddingX: 1, paddingY: 1 },
     h(Text, { bold: true, color: C.accent }, "NEO"),
-    h(Text, { color: C.mute }, "mode"),
+    h(Text, { color: C.mute }, "choose a mode"),
     h(Box, { marginTop: 1 }, h(SelectInput, {
       items,
       onSelect: (item) => onPick(item.value),
@@ -56,7 +64,7 @@ function ModePicker({ onPick }) {
   );
 }
 
-function Header({ mode, model, voice, busy, daemon }) {
+function Header({ mode, model, voice, busy, daemon, convId }) {
   return h(
     Box,
     {
@@ -71,7 +79,7 @@ function Header({ mode, model, voice, busy, daemon }) {
       { alignItems: "center" },
       h(Text, { bold: true, color: C.accent }, "NEO"),
       h(Text, {}, " "),
-      h(Badge, { label: String(mode).toUpperCase() }),
+      h(Badge, { label: modeName(mode) }),
       h(Text, {}, " "),
       h(Badge, { label: model, tone: "mute" }),
       h(Text, {}, " "),
@@ -90,12 +98,14 @@ function Header({ mode, model, voice, busy, daemon }) {
         : null,
     ),
     h(Text, { color: C.mute }, process.env.NEO_WORKSPACE || process.cwd()),
-    h(Text, { color: C.mute }, "modes: /plan  /code  /work"),
+    convId ? h(Text, { color: C.mute }, `chat ${convId}`) : null,
+    h(Text, { color: C.mute }, modesHintLine()),
+    h(Text, { color: C.mute }, "/new /history /resume <id>  ·  /quit"),
   );
 }
 
 function Feed({ items }) {
-  const shown = items.filter((m) => m.role !== "sys" || m.important).slice(-10);
+  const shown = items.filter((m) => m.role !== "sys" || m.important).slice(-14);
   return h(
     Box,
     {
@@ -116,9 +126,14 @@ function Feed({ items }) {
               Text,
               {
                 bold: true,
-                color: m.role === "you" ? C.accent : m.role === "neo" ? C.good : C.mute,
+                color:
+                  m.role === "You" || m.role === "you"
+                    ? C.accent
+                    : m.role === "Neo" || m.role === "neo"
+                      ? C.good
+                      : C.mute,
               },
-              m.role === "sys" ? "·" : m.role,
+              m.role === "sys" ? "·" : m.role === "you" ? "You" : m.role === "neo" ? "Neo" : m.role,
             ),
             h(Text, { color: C.mute }, "  "),
             h(Text, { color: C.ink }, m.text),
@@ -135,8 +150,8 @@ function Composer({ value, onChange, onSubmit, mode, voicePartial }) {
     h(
       Box,
       {},
-      h(Text, { bold: true, color: C.accent }, (mode || "").toUpperCase()),
-      h(Text, { color: C.mute }, " › "),
+      h(Text, { bold: true, color: C.accent }, modePromptLabel(mode)),
+      h(Text, { color: C.mute }, " "),
       h(TextInput, { value, onChange, onSubmit, placeholder: "", focus: true }),
     ),
   );
@@ -153,7 +168,9 @@ function App() {
   const [voice, setVoice] = useState("off");
   const [voicePartial, setVoicePartial] = useState("");
   const [daemon, setDaemon] = useState(false);
+  const [conversationId, setConversationId] = useState(null);
   const messagesRef = useRef([]);
+  const conversationIdRef = useRef(null);
   const voiceStopRef = useRef(null);
   const locked = useRef(false);
 
@@ -166,8 +183,8 @@ function App() {
     writeState({ ...st, mode: null });
     setModel(st.text_model || "neo-brain");
     pyExec("project_set_root", { path: process.env.NEO_WORKSPACE || process.cwd() });
-    ensureImageDaemonSilent();
-    ensureBrainDaemonSilent();
+    void ensureImageDaemonSilent();
+    void ensureBrainDaemonSilent();
     const t = setInterval(async () => {
       try {
         const r = await fetch("http://127.0.0.1:8765/health");
@@ -190,13 +207,29 @@ function App() {
     }
   });
 
-  const pickMode = (m) => {
+  const pickMode = async (m) => {
     const st = readState();
     st.mode = m;
     writeState(st);
     pyExec("set_mode", { mode: m });
     setMode(m);
-    messagesRef.current = [{ role: "system", content: systemPrompt(m, st.text_model || model) }];
+    const activeModel = st.text_model || model;
+    const session = await openWorkspaceConversation({ mode: m, model: activeModel });
+    conversationIdRef.current = session.conversationId;
+    setConversationId(session.conversationId);
+    messagesRef.current = session.messages;
+    if (session.resumed && session.feed?.length) {
+      setFeed([
+        ...session.feed,
+        {
+          role: "sys",
+          text: `resumed ${session.conversationId} (${session.feed.length} turns)`,
+          important: true,
+        },
+      ]);
+    } else {
+      setFeed([]);
+    }
   };
 
   const runAgent = async (userText) => {
@@ -205,17 +238,22 @@ function App() {
     const st = readState();
     const activeMode = st.mode || mode || "work";
     const activeModel = st.text_model || model;
-    push("you", userText);
+    push("You", userText);
     try {
-      await runAgentTurn({
+      const out = await runAgentTurn({
         messages: messagesRef.current,
         mode: activeMode,
         model: activeModel,
         userText,
+        conversationId: conversationIdRef.current,
         onNote: (t) => push("sys", t, true),
         onBusy: (b) => setBusy(b || ""),
-        onReply: (t) => push("neo", t),
+        onReply: (t) => push("Neo", t),
       });
+      if (out?.conversationId) {
+        conversationIdRef.current = out.conversationId;
+        setConversationId(out.conversationId);
+      }
     } finally {
       setBusy("");
       locked.current = false;
@@ -232,8 +270,54 @@ function App() {
         exit();
         return;
       }
+      if (line === "/new") {
+        const session = await openWorkspaceConversation({
+          mode: mode || "work",
+          model,
+          forceNew: true,
+        });
+        conversationIdRef.current = session.conversationId;
+        setConversationId(session.conversationId);
+        messagesRef.current = session.messages;
+        setFeed([{ role: "sys", text: `new chat ${session.conversationId || "(local)"}`, important: true }]);
+        return;
+      }
+      if (line === "/history") {
+        const data = await listConversations(20, process.env.NEO_WORKSPACE || process.cwd());
+        const rows = data.conversations || [];
+        if (!rows.length) push("sys", "no saved chats", true);
+        else {
+          for (const c of rows) {
+            const mark = c.id === conversationIdRef.current ? "*" : " ";
+            push("sys", `${mark} ${c.id}  ${(c.title || "chat").slice(0, 48)}`, true);
+          }
+        }
+        return;
+      }
+      if (line.startsWith("/resume ")) {
+        const id = line.slice(8).trim();
+        const data = await loadConversation(id);
+        const cid = data.conversation?.id || id;
+        conversationIdRef.current = cid;
+        setConversationId(cid);
+        const chat = data.chat || [];
+        messagesRef.current = chatToAgentMessages(chat, mode || "work", model);
+        setFeed([
+          ...chatMessagesToFeed(chat),
+          { role: "sys", text: `resumed ${cid}`, important: true },
+        ]);
+        return;
+      }
       if (line === "/plan" || line === "/code" || line === "/work") {
-        pickMode(line.slice(1));
+        const next = line.slice(1);
+        const st = readState();
+        st.mode = next;
+        writeState(st);
+        pyExec("set_mode", { mode: next });
+        setMode(next);
+        if (messagesRef.current[0]) {
+          messagesRef.current[0] = { role: "system", content: systemPrompt(next, model) };
+        }
         return;
       }
       if (line === "/voice") {
@@ -295,7 +379,7 @@ function App() {
   return h(
     Box,
     { flexDirection: "column", paddingX: 1 },
-    h(Header, { mode, model, voice, busy, daemon }),
+    h(Header, { mode, model, voice, busy, daemon, convId: conversationId }),
     h(Feed, { items: feed }),
     h(Composer, { value: input, onChange: setInput, onSubmit, mode, voicePartial }),
   );

@@ -1,10 +1,6 @@
-node_modules/
+**/__pycache__/
+**/*.pyc
+**/.neo/
 outputs/
-workspace/
-*.pyc
-__pycache__/
-.tmp/
-tmp-*
-core/session_state.json
-.npmignore
-*.partial
+*.tgz
+node_modules/

@@ -4,6 +4,7 @@
  */
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import {
   DEFAULT_BRAIN_PORT,
@@ -44,14 +45,22 @@ async function fetchJson(url, timeoutMs = 2500) {
 async function main() {
   console.log("NEO doctor\n");
 
-  // Node
-  ok(`node ${process.version} (${process.execPath})`);
+  // Platform
+  ok(`os ${process.platform} ${os.arch()} · node ${process.version}`);
+  const nodeMajor = Number(String(process.versions.node).split(".")[0]);
+  if (nodeMajor >= 20) ok(`node >= 20 (${process.version})`);
+  else bad(`node ${process.version} — Neo requires Node.js 20+`);
   ok(`package ${PACKAGE_ROOT}`);
 
   // neo on PATH
   const neoCmd = which("neo") || which("neo.cmd");
   if (neoCmd) ok(`neo on PATH → ${neoCmd}`);
-  else bad("neo not on PATH — run: npm install -g @node30/neo   or   npm run install-global");
+  else bad("neo not on PATH — run: npm install -g github:Salazar534/neo --force   or   neo repair");
+
+  // python3 / python
+  const pyWhich = which(process.platform === "win32" ? "python" : "python3") || which("python");
+  if (pyWhich) ok(`python on PATH → ${pyWhich}`);
+  else bad("python3/python missing — install Python 3.10+ then: neo install");
 
   // Data dir
   const data = neoDataRoot();
@@ -109,11 +118,11 @@ async function main() {
   const port = cfg?.brain_port || DEFAULT_BRAIN_PORT;
   const brain = await fetchJson(`http://127.0.0.1:${port}/health`);
   if (brain.ok && brain.json?.ready) {
-    ok(`brain daemon ready @ :${port} device=${brain.json.device || "?"}`);
+    ok(`API/brain ready @ :${port} device=${brain.json.device || "?"}`);
   } else if (brain.ok) {
-    bad(`brain listening but not ready: ${brain.json?.error || "loading"}`);
+    bad(`API listening but not ready: ${brain.json?.error || "loading"}`);
   } else {
-    info(`brain daemon not running (starts on first neo chat) — ${brain.error || ""}`);
+    info(`API/brain not running (starts on first neo chat) — ${brain.error || ""}`);
   }
 
   // Image daemon optional
@@ -121,14 +130,10 @@ async function main() {
   if (img.ok && img.json?.ready) ok("image daemon warm @ :8765");
   else info("image daemon optional / not warm");
 
-  // Ollama optional
-  if (process.env.NEO_USE_OLLAMA === "1") {
-    const ol = await fetchJson("http://127.0.0.1:11434/api/tags");
-    if (ol.ok) ok("NEO_USE_OLLAMA=1 and Ollama reachable");
-    else bad("NEO_USE_OLLAMA=1 but Ollama not reachable");
-  } else {
-    info("Ollama not required (set NEO_USE_OLLAMA=1 to force fallback)");
-  }
+  // DB
+  const db = path.join(data, "neo.db");
+  if (fs.existsSync(db)) ok(`sqlite → ${db}`);
+  else info(`sqlite will be created on first brain start → ${db}`);
 
   // Workspace
   info(`NEO_WORKSPACE=${process.env.NEO_WORKSPACE || process.cwd()}`);

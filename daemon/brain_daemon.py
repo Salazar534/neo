@@ -45,6 +45,22 @@ STARTED_AT = time.time()
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 
 
+def _setup_daemon_logging() -> None:
+    """Send prints to Neo logs dir — no visible console required (pythonw-safe)."""
+    import sys
+
+    log_env = os.environ.get("NEO_DAEMON_LOG")
+    log_path = Path(log_env) if log_env else (data_root() / "logs" / "neo-brain.log")
+    try:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        fp = open(log_path, "a", encoding="utf-8", buffering=1)
+        if sys.stdout is None or not getattr(sys.stdout, "isatty", lambda: False)():
+            sys.stdout = fp
+            sys.stderr = fp
+    except Exception:
+        pass
+
+
 def load_config() -> dict:
     cfg_path = data_root() / "config.json"
     if cfg_path.is_file():
@@ -462,7 +478,25 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/v1/conversations":
             limit = int((qs.get("limit") or ["50"])[0])
-            self._json(200, {"ok": True, "conversations": STORE.list_conversations(limit)})
+            workspace = (qs.get("workspace") or [None])[0]
+            rows = STORE.list_conversations(max(limit, 80) if workspace else limit)
+            latest = None
+            if workspace:
+                latest = STORE.find_latest_for_workspace(workspace, limit=80)
+                target = os.path.normcase(os.path.abspath(workspace))
+                filtered = []
+                for r in rows:
+                    ws = r.get("workspace") or ""
+                    try:
+                        if os.path.normcase(os.path.abspath(ws)) == target:
+                            filtered.append(r)
+                    except Exception:
+                        if ws == workspace:
+                            filtered.append(r)
+                rows = filtered[:limit]
+                if latest and not any(r["id"] == latest["id"] for r in rows):
+                    rows = [latest] + rows
+            self._json(200, {"ok": True, "conversations": rows, "latest": latest})
             return
         if path.startswith("/v1/conversations/") and path.endswith("/messages"):
             cid = path[len("/v1/conversations/") : -len("/messages")]
@@ -618,26 +652,24 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     global READY, LOAD_ERROR, STORE
-    # Import path: run from daemon/ or with package root on sys.path
-    import sys
 
-    daemon_dir = str(Path(__file__).resolve().parent)
-    if daemon_dir not in sys.path:
-        sys.path.insert(0, daemon_dir)
-
-    # Re-import after path fix if needed
-    global NeoStore  # noqa: F811 — already imported at top when run as script from daemon/
-
+    _setup_daemon_logging()
     cfg = load_config()
     STORE = NeoStore(Path(cfg["db_path"]) if cfg.get("db_path") else None)
     port = int(os.environ.get("NEO_BRAIN_PORT") or cfg.get("brain_port") or 8766)
     host = os.environ.get("NEO_BRAIN_HOST") or "127.0.0.1"
-    try:
-        load_llm()
-    except Exception as e:
-        READY = False
-        LOAD_ERROR = str(e)
-        print(f"[neo] load failed: {e}", flush=True)
+
+    # Serve conversation/memory APIs immediately; load GGUF in background.
+    def _load_bg():
+        global READY, LOAD_ERROR
+        try:
+            load_llm()
+        except Exception as e:
+            READY = False
+            LOAD_ERROR = str(e)
+            print(f"[neo] load failed: {e}", flush=True)
+
+    threading.Thread(target=_load_bg, name="neo-llm-load", daemon=True).start()
     httpd = ThreadingHTTPServer((host, port), Handler)
     print(f"[neo] API listening http://{host}:{port}  db={STORE.path}", flush=True)
     httpd.serve_forever()

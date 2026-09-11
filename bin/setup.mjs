@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Local/dev setup — catalog, optional image deps, register PATH.
- * Model download is via `neo install` (not Ollama).
+ * Model download is via `neo install` (Neo-branded GGUF assets).
  */
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
@@ -18,7 +18,7 @@ const args = process.argv.slice(2);
 
 function run(cmd, a, opts = {}) {
   console.log("+", cmd, a.join(" "));
-  const r = spawnSync(cmd, a, { stdio: "inherit", ...opts });
+  const r = spawnSync(cmd, a, { stdio: "inherit", windowsHide: true, ...opts });
   if (r.status) process.exit(r.status);
 }
 
@@ -32,7 +32,7 @@ if (args.includes("--daemon")) {
   process.exit(0);
 }
 
-console.log("NEO setup (no Ollama required)");
+console.log("NEO setup (fully local)");
 run(py, [path.join(root, "core", "gen_catalog.py")]);
 
 if (!args.includes("--skip-image-deps")) {

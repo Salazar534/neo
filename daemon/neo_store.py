@@ -127,18 +127,43 @@ class NeoStore:
         row = self._conn.execute("SELECT * FROM conversations WHERE id=?", (cid,)).fetchone()
         return dict(row) if row else None
 
-    def list_conversations(self, limit: int = 50, include_archived: bool = False) -> list[dict]:
-        if include_archived:
-            rows = self._conn.execute(
-                "SELECT * FROM conversations ORDER BY updated_at DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
-        else:
-            rows = self._conn.execute(
-                "SELECT * FROM conversations WHERE archived=0 ORDER BY updated_at DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
+    def list_conversations(
+        self,
+        limit: int = 50,
+        include_archived: bool = False,
+        workspace: str | None = None,
+    ) -> list[dict]:
+        params: list[Any] = []
+        where = []
+        if not include_archived:
+            where.append("archived=0")
+        if workspace:
+            where.append("workspace=?")
+            params.append(workspace)
+        clause = f"WHERE {' AND '.join(where)} " if where else ""
+        params.append(limit)
+        rows = self._conn.execute(
+            f"SELECT * FROM conversations {clause}ORDER BY updated_at DESC LIMIT ?",
+            params,
+        ).fetchall()
         return [dict(r) for r in rows]
+
+    def find_latest_for_workspace(self, workspace: str, limit: int = 20) -> dict | None:
+        """Match workspace path loosely (resolve / case-insensitive on Windows)."""
+        if not workspace:
+            return None
+        target = os.path.normcase(os.path.abspath(workspace))
+        for row in self.list_conversations(limit=limit, include_archived=False):
+            ws = row.get("workspace") or ""
+            if not ws:
+                continue
+            try:
+                if os.path.normcase(os.path.abspath(ws)) == target:
+                    return row
+            except Exception:
+                if ws == workspace:
+                    return row
+        return None
 
     def touch_conversation(self, cid: str, **fields):
         cols = []

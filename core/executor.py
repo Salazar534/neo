@@ -22,12 +22,22 @@ ROOT = Path(__file__).resolve().parents[1]
 CATALOG_PATH = Path(__file__).resolve().parent / "tools_catalog.json"
 OUT_DIR = (ROOT / "outputs").resolve()
 def _neo_data_root() -> Path:
+    # Prefer shared helper when package layout is intact (npm/git install).
+    try:
+        sys.path.insert(0, str(ROOT / "daemon"))
+        from neo_paths import data_root as _dr  # type: ignore
+
+        return _dr()
+    except Exception:
+        pass
     env = os.environ.get("NEO_HOME")
     if env:
         return Path(env)
     if os.name == "nt":
         base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
         return Path(base) / "Neo"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "Neo"
     xdg = os.environ.get("XDG_DATA_HOME")
     if xdg:
         return Path(xdg) / "neo"
@@ -150,6 +160,13 @@ def resolve_path(p: str) -> Path:
     return path
 
 
+def _no_window_kwargs() -> dict:
+    """Hide console windows for tool subprocesses on Windows (CREATE_NO_WINDOW)."""
+    if os.name != "nt":
+        return {}
+    return {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)}
+
+
 def run_cmd(args: list[str], timeout: int = 120, cwd: str | None = None) -> dict:
     try:
         cp = subprocess.run(
@@ -159,6 +176,7 @@ def run_cmd(args: list[str], timeout: int = 120, cwd: str | None = None) -> dict
             timeout=timeout,
             cwd=cwd or str(get_workspace()),
             shell=False,
+            **_no_window_kwargs(),
         )
         return ok(
             {
@@ -738,12 +756,147 @@ def h_fs_search_special(args, tool):
     return h_fs_find_text({"root": str(folder), "query": args["query"]}, tool)
 
 
+@handler("pc_search")
+def h_pc_search(args, tool):
+    """Search Desktop/Documents/Downloads/Home/cwd for files by name or text."""
+    scope = str(args.get("scope") or "cwd").lower()
+    query = str(args.get("query") or "")
+    kind = str(args.get("kind") or "name")  # name | text
+    limit = int(args.get("limit") or 80)
+    scope_map = {
+        "desktop": "Desktop",
+        "documents": "Documents",
+        "downloads": "Downloads",
+        "home": "Home",
+        "cwd": "Workspace",
+        "workspace": "Workspace",
+    }
+    folder = special_folder(scope_map.get(scope, "Workspace"))
+    if kind == "text" and query:
+        return h_fs_find_text({"root": str(folder), "query": query, "limit": limit}, tool)
+    hits = []
+    q = query.lower()
+    try:
+        for p in folder.rglob("*"):
+            if _should_skip_path(p):
+                continue
+            if not q or q in p.name.lower():
+                hits.append({"path": str(p), "is_dir": p.is_dir()})
+                if len(hits) >= limit:
+                    break
+    except Exception as e:
+        return err(str(e))
+    return ok({"scope": scope, "root": str(folder), "hits": hits, "count": len(hits)})
+
+
+@handler("pc_create")
+def h_pc_create(args, tool):
+    """Create folder and/or file under Desktop/Documents/Downloads/Home/cwd."""
+    scope = str(args.get("scope") or "desktop").lower()
+    name = str(args.get("path") or args.get("name") or "")
+    if not name:
+        return err("path or name required")
+    scope_map = {
+        "desktop": "Desktop",
+        "documents": "Documents",
+        "downloads": "Downloads",
+        "home": "Home",
+        "cwd": "Workspace",
+        "workspace": "Workspace",
+    }
+    base = special_folder(scope_map.get(scope, "Desktop"))
+    target = (base / name).expanduser()
+    if not str(target.resolve()).startswith(str(base.resolve())):
+        # allow nested relative only under special folder
+        target = base / Path(name).name
+    content = args.get("content")
+    is_dir = bool(args.get("directory") or args.get("dir") or content is None and name.endswith(("/", "\\")))
+    if is_dir or content is None and not Path(name).suffix:
+        target.mkdir(parents=True, exist_ok=True)
+        return ok({"path": str(target.resolve()), "kind": "directory", "scope": scope})
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(str(content if content is not None else ""), encoding="utf-8")
+    return ok({"path": str(target.resolve()), "kind": "file", "bytes": target.stat().st_size, "scope": scope})
+
+
+@handler("browser_open")
+def h_browser_open(args, tool):
+    """Open URL or local HTML file in the default browser."""
+    target = str(args.get("url") or args.get("path") or "")
+    if not target:
+        return err("url or path required")
+    if not target.startswith(("http://", "https://", "file:")):
+        p = resolve_path(target)
+        if p.exists():
+            target = p.resolve().as_uri()
+        else:
+            target = "http://" + target if target.startswith("localhost") else target
+    if os.name == "nt":
+        return run_cmd(["cmd", "/c", "start", "", target])
+    import sys as _sys
+
+    if _sys.platform == "darwin":
+        return run_cmd(["open", target])
+    return run_cmd(["xdg-open", target])
+
+
+_PREVIEW_SERVERS: dict[int, subprocess.Popen] = {}
+
+
+@handler("preview_server")
+def h_preview_server(args, tool):
+    """Start a simple static HTTP preview server for a directory; open browser optionally."""
+    root = resolve_path(args.get("path") or ".")
+    if not root.is_dir():
+        return err(f"not a directory: {root}")
+    port = int(args.get("port") or 8767)
+    open_browser = bool(args.get("open", True))
+    action = str(args.get("action") or "start")
+    if action == "stop":
+        proc = _PREVIEW_SERVERS.pop(port, None)
+        if proc and proc.poll() is None:
+            proc.terminate()
+        return ok({"stopped": port})
+    if port in _PREVIEW_SERVERS and _PREVIEW_SERVERS[port].poll() is None:
+        url = f"http://127.0.0.1:{port}/"
+        if open_browser:
+            h_browser_open({"url": url}, tool)
+        return ok({"url": url, "path": str(root), "already_running": True})
+    code = (
+        "import http.server, socketserver, os;\n"
+        f"os.chdir({str(root)!r});\n"
+        f"httpd = socketserver.TCPServer(('127.0.0.1', {port}), http.server.SimpleHTTPRequestHandler);\n"
+        "httpd.serve_forever()\n"
+    )
+    proc = subprocess.Popen(
+        [sys.executable, "-c", code],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
+    )
+    _PREVIEW_SERVERS[port] = proc
+    url = f"http://127.0.0.1:{port}/"
+    time.sleep(0.35)
+    if open_browser:
+        h_browser_open({"url": url}, tool)
+    return ok({"url": url, "path": str(root), "port": port, "pid": proc.pid})
+
+
 @handler("shell_powershell")
 def h_shell_powershell(args, tool):
     cmd = str(args["command"])
     timeout = int(args.get("timeout_sec") or 120)
     return run_cmd(
-        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", cmd],
+        [
+            "powershell",
+            "-NoProfile",
+            "-WindowStyle",
+            "Hidden",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            cmd,
+        ],
         timeout=timeout,
     )
 
@@ -1809,8 +1962,14 @@ def h_mcp_write_config(args, tool):
     return ok({"path": str(path)})
 
 
-@handler("model_ollama_list")
-def h_model_ollama_list(args, tool):
+def _external_llm_enabled() -> bool:
+    return os.environ.get("NEO_USE_OLLAMA") == "1" or os.environ.get("NEO_USE_EXTERNAL_LLM") == "1"
+
+
+@handler("model_external_list")
+def h_model_external_list(args, tool):
+    if not _external_llm_enabled():
+        return err("external LLM list disabled (Neo brain is default)")
     got = web_get("http://127.0.0.1:11434/api/tags", 200000)
     if not got.get("ok"):
         return got
@@ -1818,13 +1977,27 @@ def h_model_ollama_list(args, tool):
     return ok([m.get("name") for m in models])
 
 
-@handler("model_ollama_pull")
-def h_model_ollama_pull(args, tool):
+@handler("model_ollama_list")
+def h_model_ollama_list(args, tool):
+    return h_model_external_list(args, tool)
+
+
+@handler("model_external_pull")
+def h_model_external_pull(args, tool):
+    if not _external_llm_enabled():
+        return err("external LLM pull disabled — use: neo install")
     return run_cmd(["ollama", "pull", str(args["name"])], timeout=3600)
 
 
-@handler("model_ollama_run_prompt")
-def h_model_ollama_run_prompt(args, tool):
+@handler("model_ollama_pull")
+def h_model_ollama_pull(args, tool):
+    return h_model_external_pull(args, tool)
+
+
+@handler("model_external_run_prompt")
+def h_model_external_run_prompt(args, tool):
+    if not _external_llm_enabled():
+        return err("external LLM run disabled — Neo brain is default")
     payload = json.dumps({"model": args["model"], "prompt": args["prompt"], "stream": False}).encode()
     req = urllib.request.Request(
         "http://127.0.0.1:11434/api/generate",
@@ -1835,6 +2008,11 @@ def h_model_ollama_run_prompt(args, tool):
     with urllib.request.urlopen(req, timeout=180) as r:
         body = json.loads(r.read().decode())
     return ok({"response": body.get("response", "")[:8000]})
+
+
+@handler("model_ollama_run_prompt")
+def h_model_ollama_run_prompt(args, tool):
+    return h_model_external_run_prompt(args, tool)
 
 
 @handler("model_switch_text")
@@ -1849,14 +2027,15 @@ def h_model_switch_text(args, tool):
 def h_model_capabilities(args, tool):
     return ok(
         {
-            "text": "Neo local GGUF brain (llama.cpp) — neo-brain default; Ollama optional via NEO_USE_OLLAMA=1",
-            "image": "Warm SD-Turbo daemon + exact_text overlay for perfect typography",
-            "vision": "optional via separate vision GGUF / Ollama if configured",
+            "text": "Neo local GGUF brain (neo-brain / neo-coder)",
+            "image": "Neo image daemon (neo-image) + exact_text overlay",
+            "vision": "optional neo-vision GGUF if installed",
             "code": "python/node smoke, git, scaffolds, bug scan, chunked writes, apply_patch",
-            "web": "fetch/search/download",
-            "windows": "powershell/cmd/services/clipboard/screenshot",
+            "web": "fetch/search/download (on demand only)",
+            "windows": "powershell/cmd/pc_search/pc_create/browser preview",
             "packages": "pip/npm/winget/choco",
-            "mcp": "install + write write",
+            "mcp": "install + config write",
+            "api": "local REST :8766 + SQLite conversations",
             "tools_total": CATALOG["count"],
         }
     )
