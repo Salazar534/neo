@@ -8,18 +8,14 @@
     "neo": "./bin/neo.mjs"
   },
   "files": [
-    "bin/**",
-    "ui/**",
-    "core/**",
-    "daemon/**",
-    "worker/**",
+    "bin",
+    "ui",
+    "core",
+    "daemon",
+    "worker",
     "LICENSE",
     "README.md",
-    "Modelfile.neo-brain",
-    "!**/__pycache__/**",
-    "!**/*.pyc",
-    "!**/.neo/**",
-    "!**/outputs/**"
+    "Modelfile.neo-brain"
   ],
   "scripts": {
     "neo": "node ./bin/neo.mjs",
