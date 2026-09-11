@@ -8,36 +8,37 @@ Neo runs on your machine. Conversations, tools, and its own API stay on-device. 
 
 Requires **Node.js 20+**. Full model bundle is about **~6.5 GB** download (run once via `neo install`).
 
-### Windows (CMD / PowerShell) · macOS (Terminal) · Linux
+### Works right now (recommended until npm publish)
 
-**From npm** (when `@node30/neo` is published):
+**Windows (PowerShell / CMD)** — set a writable npm prefix first (fixes WinGet Node `EPERM`/`EEXIST`):
 
-```bash
-npm install -g @node30/neo
+```powershell
+npm config set prefix "$env:APPDATA\npm"
+git clone https://github.com/Salazar534/neo.git
+cd neo
+npm install -g . --force
 neo install
 ```
 
-**From GitHub** (works worldwide today — use HTTPS):
-
-```bash
-npm config set prefix "%APPDATA%\npm"
-npm install -g https://github.com/Salazar534/neo.git --force
-neo install
-```
-
-macOS / Linux (prefix usually already writable):
-
-```bash
-npm install -g https://github.com/Salazar534/neo.git --force
-neo install
-```
-
-**Clone fallback** (if npm git install is empty/broken):
+**macOS / Linux:**
 
 ```bash
 git clone https://github.com/Salazar534/neo.git
 cd neo
 npm install -g . --force
+neo install
+```
+
+One-liner alternative (HTTPS git URL — if this leaves an empty install on Windows, use the clone steps above):
+
+```bash
+npm install -g https://github.com/Salazar534/neo.git --force && neo install
+```
+
+### From npm (after `@node30/neo` is published)
+
+```bash
+npm install -g @node30/neo
 neo install
 ```
 
@@ -48,21 +49,18 @@ neo doctor
 neo
 ```
 
-If Windows shows `EPERM` / `EEXIST` on `neo.cmd` (common with WinGet Node), or PowerShell runs an old `neo` function:
+If `neo` is missing or Windows conflicts on `neo.cmd`:
 
 ```bash
-npm config set prefix "%APPDATA%\npm"
-npm install -g https://github.com/Salazar534/neo.git --force
 neo repair
-neo install
 ```
 
-Open a **new** terminal after repair so PATH refreshes.
+(or from the clone: `node bin/fix-path.mjs`) then open a **new** terminal.
 
 | Goal | Command |
 |---|---|
-| Recommended (npm) | `npm install -g @node30/neo && neo install` |
-| Works now (GitHub) | `npm install -g https://github.com/Salazar534/neo.git --force && neo install` |
+| **Works now** | `git clone … && cd neo && npm install -g . --force && neo install` |
+| After npm publish | `npm install -g @node30/neo && neo install` |
 | Models during npm | `NEO_INSTALL_MODELS=1 npm install -g …` |
 | Text brain only | `neo install --skip-image` |
 | Fix PATH / stale shims | `neo repair` |

@@ -106,9 +106,9 @@ Usage:
   neo help         Show this help
 
 Install:
+  git clone https://github.com/Salazar534/neo.git && cd neo && npm install -g . --force && neo install
+  # after publish:
   npm install -g @node30/neo && neo install
-  # until published:
-  npm install -g https://github.com/Salazar534/neo.git --force && neo install
 
 Env:
   NEO_WORKSPACE     file write root (default: cwd)
