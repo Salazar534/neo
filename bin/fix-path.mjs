@@ -136,7 +136,7 @@ function main() {
   log("");
   ensureWindowsNpmPrefix();
   log("\nNext:");
-  log("  npm install -g https://github.com/Salazar534/neo.git --force");
+  log("  npm install -g .          # from a clone");
   log("  neo install");
   log("  (after npm publish: npm install -g @node30/neo)");
 }

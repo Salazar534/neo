@@ -45,9 +45,26 @@ export function neoRootMarkerPath() {
  * upstream_* fields are fetch mirrors only — never shown as product names.
  *
  * Modes Neo Plan / Neo Code / Neo Work all run on neo-brain.gguf (one GGUF).
- * neo-coder.gguf is the same weights under a role name (hardlink when possible).
+ * neo-coder / neo-plan / neo-work are the same weights under role names (hardlink when possible).
  * Neo Vision = local image weights under models/neo-image/.
  */
+function brainAlias(id, brand, file, description) {
+  return {
+    id,
+    brand,
+    file,
+    required: true,
+    kind: "gguf",
+    upstream_repo: "unsloth/Qwen2.5-Coder-3B-Instruct-GGUF",
+    upstream_file: "Qwen2.5-Coder-3B-Instruct-Q4_K_M.gguf",
+    alias_of: "brain",
+    approx_bytes: 1_930_000_000,
+    approx_mb: 1930,
+    download: false,
+    description,
+  };
+}
+
 export const NEO_MODELS = {
   brain: {
     id: "neo-brain",
@@ -65,21 +82,24 @@ export const NEO_MODELS = {
     download: true,
     description: "Primary Neo text brain (powers Plan / Code / Work modes)",
   },
-  coder: {
-    id: "neo-coder",
-    brand: "Neo Code",
-    file: "neo-coder.gguf",
-    required: true,
-    kind: "gguf",
-    upstream_repo: "unsloth/Qwen2.5-Coder-3B-Instruct-GGUF",
-    upstream_file: "Qwen2.5-Coder-3B-Instruct-Q4_K_M.gguf",
-    // Same GGUF as brain; install hardlinks/copies instead of re-fetch
-    alias_of: "brain",
-    approx_bytes: 1_930_000_000,
-    approx_mb: 1930,
-    download: false,
-    description: "Neo Code role weights (same file as Neo Brain; hardlink when possible)",
-  },
+  coder: brainAlias(
+    "neo-coder",
+    "Neo Code",
+    "neo-coder.gguf",
+    "Neo Code role weights (same file as Neo Brain; hardlink when possible)",
+  ),
+  plan: brainAlias(
+    "neo-plan",
+    "Neo Plan",
+    "neo-plan.gguf",
+    "Neo Plan role weights (same file as Neo Brain; hardlink when possible)",
+  ),
+  work: brainAlias(
+    "neo-work",
+    "Neo Work",
+    "neo-work.gguf",
+    "Neo Work role weights (same file as Neo Brain; hardlink when possible)",
+  ),
   image: {
     id: "neo-vision",
     brand: "Neo Vision",
@@ -109,26 +129,45 @@ export const NEO_RUNTIME_APPROX = {
 export function neoInstallSizePlan(opts = {}) {
   const skipImage = Boolean(opts.skipImage);
   const brain = NEO_MODELS.brain;
-  const coder = NEO_MODELS.coder;
   const image = NEO_MODELS.image;
+  const aliasNote = (spec) =>
+    "hardlink ≈ 0 extra disk; copy ≈ +" + formatBytes(spec.approx_bytes) + " if hardlink fails";
   const assets = [
     {
       key: "brain",
       brand: brain.brand,
       pathName: brain.file,
-      role: "Neo Plan · Neo Code · Neo Work (shared GGUF)",
+      role: "Shared GGUF (Plan / Code / Work)",
       downloadBytes: brain.approx_bytes,
       diskBytes: brain.approx_bytes,
-      note: "one download",
+      note: "one download from Hugging Face",
     },
     {
       key: "coder",
-      brand: coder.brand,
-      pathName: coder.file,
-      role: "Neo Code role file (alias of Neo Brain)",
+      brand: NEO_MODELS.coder.brand,
+      pathName: NEO_MODELS.coder.file,
+      role: "Neo Code role alias",
       downloadBytes: 0,
       diskBytes: 0,
-      note: "hardlink ≈ 0 extra disk; copy ≈ +" + formatBytes(coder.approx_bytes) + " if hardlink fails",
+      note: aliasNote(NEO_MODELS.coder),
+    },
+    {
+      key: "plan",
+      brand: NEO_MODELS.plan.brand,
+      pathName: NEO_MODELS.plan.file,
+      role: "Neo Plan role alias",
+      downloadBytes: 0,
+      diskBytes: 0,
+      note: aliasNote(NEO_MODELS.plan),
+    },
+    {
+      key: "work",
+      brand: NEO_MODELS.work.brand,
+      pathName: NEO_MODELS.work.file,
+      role: "Neo Work role alias",
+      downloadBytes: 0,
+      diskBytes: 0,
+      note: aliasNote(NEO_MODELS.work),
     },
   ];
   if (!skipImage) {
@@ -139,7 +178,7 @@ export function neoInstallSizePlan(opts = {}) {
       role: "Local image generation",
       downloadBytes: image.approx_bytes,
       diskBytes: image.approx_bytes,
-      note: "fp16 pipeline weights",
+      note: "Hugging Face snapshot (fp16 pipeline)",
     });
   }
   const runtimeMb =

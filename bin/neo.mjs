@@ -99,14 +99,14 @@ function help() {
 
 Usage:
   neo              Start the agent UI
-  neo install      Download ALL Neo models + brain runtime (with progress)
+  neo install      FULL setup same terminal: Brain+aliases+Vision+pip (~6.45GB)
   neo doctor       Check models, PATH, API/daemons
-  neo repair       Fix stale neo.cmd / PATH (WinGet EPERM/EEXIST)
+  neo repair       Fix stale neo shims / npm PATH
   neo brain        Run Neo API/brain daemon (foreground)
   neo help         Show this help
 
-Install:
-  git clone https://github.com/Salazar534/neo.git && cd neo && npm install -g . --force && neo install
+Install (Mac Terminal or Windows PowerShell/CMD):
+  git clone https://github.com/Salazar534/neo.git && cd neo && npm install -g . && neo install
   # after publish:
   npm install -g @node30/neo && neo install
 

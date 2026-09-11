@@ -55,7 +55,7 @@ async function main() {
   // neo on PATH
   const neoCmd = which("neo") || which("neo.cmd");
   if (neoCmd) ok(`neo on PATH → ${neoCmd}`);
-  else bad("neo not on PATH — run: npm install -g github:Salazar534/neo --force   or   neo repair");
+  else bad("neo not on PATH — open a new terminal, or: neo repair   then   npm install -g .");
 
   // python3 / python
   const pyWhich = which(process.platform === "win32" ? "python" : "python3") || which("python");
@@ -100,6 +100,23 @@ async function main() {
   );
   if (llama.status === 0) ok((llama.stdout || "").trim());
   else bad("llama-cpp-python not installed — run: neo install");
+
+  // Role aliases + Neo Vision (full bundle)
+  for (const name of ["neo-coder.gguf", "neo-plan.gguf", "neo-work.gguf"]) {
+    const p = path.join(neoModelsDir(), name);
+    if (fs.existsSync(p) && fs.statSync(p).size > 1_000_000) ok(`alias ${name}`);
+    else info(`alias missing ${name} — re-run: neo install`);
+  }
+  const visionMarker = path.join(neoModelsDir(), "neo-image", ".neo-ready");
+  if (fs.existsSync(visionMarker)) ok(`Neo Vision weights → ${path.join(neoModelsDir(), "neo-image")}`);
+  else info("Neo Vision weights not marked ready — run: neo install  (or neo install --skip-image)");
+  const visionPy = spawnSync(
+    py,
+    ["-c", "import torch, diffusers; print('torch', torch.__version__, 'diffusers', diffusers.__version__)"],
+    { encoding: "utf8", windowsHide: true },
+  );
+  if (visionPy.status === 0) ok((visionPy.stdout || "").trim());
+  else info("Vision runtime (torch/diffusers) not installed — run: neo install");
 
   // GPU probe (best-effort)
   const gpu = spawnSync(

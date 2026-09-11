@@ -1,6 +1,6 @@
 {
   "name": "@node30/neo",
-  "version": "2.2.1",
+  "version": "2.2.2",
   "description": "NEO - fully local open-source coding agent. Own GGUF brain, local API + SQLite, 1000+ tools.",
   "type": "module",
   "license": "MIT",
@@ -15,6 +15,7 @@
     "worker",
     "LICENSE",
     "README.md",
+    "INSTALL.md",
     "Modelfile.neo-brain"
   ],
   "scripts": {
@@ -30,6 +31,7 @@
     "test:conversations": "node ./bin/test-conversations.mjs",
     "test:brain-client": "node ./bin/test-brain-client.mjs",
     "test:api": "node ./bin/test-api.mjs",
+    "preinstall": "node ./bin/preinstall.mjs",
     "postinstall": "node ./bin/postinstall.mjs"
   },
   "engines": {

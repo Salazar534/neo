@@ -1,14 +1,22 @@
 #!/usr/bin/env node
 /**
- * neo install — download ALL Neo foundational model assets + Python brain runtime.
+ * neo install — ONE command, SAME terminal, FULL Neo bundle (Mac + Windows).
  *
- * Full bundle (default): Neo Brain (+ Neo Code hardlink) + Neo Vision + pip runtime.
+ * Installs everything Neo needs before `neo` / `neo doctor` can pass for
+ * models + runtime (unless --skip-image):
+ *   1. Neo Brain GGUF
+ *   2. Neo Plan / Code / Work Neo-named aliases (hardlink/copy)
+ *   3. Neo Vision image weights
+ *   4. Brain venv + llama-cpp-python (+ hub)
+ *   5. Vision/image Python deps (torch / diffusers / …)
+ *
+ * Always same-process stdio (windowsHide). Never Start-Process / wt / open Terminal.app.
  *
  * Flags:
  *   --dry-run     print size plan, download nothing
  *   --check       verify config/model/runtime without downloading
  *   --cpu         force n_gpu_layers=0
- *   --skip-image  skip Neo Vision weights (text brain only)
+ *   --skip-image  skip Neo Vision weights + vision pip (text brain only)
  *   --brain-only  alias for --skip-image
  */
 import { spawnSync } from "node:child_process";
@@ -38,8 +46,18 @@ const checkOnly = args.includes("--check");
 const forceCpu = args.includes("--cpu");
 const skipImage = args.includes("--skip-image") || args.includes("--brain-only");
 
+const LOCK_PATH = () => path.join(neoDataRoot(), "install.lock");
+
 function log(msg) {
   console.log(msg);
+}
+
+function sleep(ms) {
+  // Portable sync sleep (same terminal; no new windows)
+  spawnSync(process.execPath, ["-e", `setTimeout(() => {}, ${Math.max(1, Number(ms) || 1)})`], {
+    windowsHide: true,
+    stdio: "ignore",
+  });
 }
 
 function which(cmd) {
@@ -53,8 +71,163 @@ function which(cmd) {
 function run(cmd, a, opts = {}) {
   log(`+ ${cmd} ${a.join(" ")}`);
   if (dryRun) return { status: 0 };
+  // Same terminal only — inherit stdio, hide extra Windows consoles
   const r = spawnSync(cmd, a, { stdio: "inherit", windowsHide: true, ...opts });
   return r;
+}
+
+function pidAlive(pid) {
+  if (!pid || !Number.isFinite(pid)) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** If another neo install owns the lock, wait (do not kill peer downloads). */
+function acquireInstallLock() {
+  if (dryRun || checkOnly) return () => {};
+  fs.mkdirSync(neoDataRoot(), { recursive: true });
+  const lock = LOCK_PATH();
+  const maxWaitMs = 90 * 60 * 1000;
+  const started = Date.now();
+  while (fs.existsSync(lock)) {
+    let peer = 0;
+    try {
+      peer = Number(String(fs.readFileSync(lock, "utf8")).trim().split(/\s+/)[0]) || 0;
+    } catch {
+      peer = 0;
+    }
+    if (peer && peer !== process.pid && pidAlive(peer)) {
+      if (Date.now() - started > maxWaitMs) {
+        console.error("Timed out waiting for another neo install (install.lock).");
+        process.exit(1);
+      }
+      log(`· another neo install running (pid ${peer}) — waiting (will not kill it)…`);
+      sleep(5000);
+      continue;
+    }
+    try {
+      fs.unlinkSync(lock);
+    } catch {
+      /* */
+    }
+    break;
+  }
+  fs.writeFileSync(lock, `${process.pid}\n${new Date().toISOString()}\n`, "utf8");
+  return () => {
+    try {
+      const cur = String(fs.readFileSync(lock, "utf8")).trim().split(/\s+/)[0];
+      if (Number(cur) === process.pid) fs.unlinkSync(lock);
+    } catch {
+      /* */
+    }
+  };
+}
+
+/**
+ * If dest.partial (or dest) is growing — another process is downloading — join/wait.
+ * Returns true if a usable dest appeared without us downloading.
+ */
+function waitForPeerFile(dest, { minBytes = 1_000_000, label = dest, timeoutMs = 90 * 60 * 1000 } = {}) {
+  const partial = dest + ".partial";
+  const started = Date.now();
+  let lastSize = -1;
+  let stableRounds = 0;
+
+  while (Date.now() - started < timeoutMs) {
+    if (fs.existsSync(dest)) {
+      try {
+        if (fs.statSync(dest).size > minBytes) {
+          log(`· ${label} ready (peer or prior install)`);
+          return true;
+        }
+      } catch {
+        /* */
+      }
+    }
+    if (!fs.existsSync(partial)) {
+      // No peer writer — we should download
+      return false;
+    }
+    let size = 0;
+    try {
+      size = fs.statSync(partial).size;
+    } catch {
+      return false;
+    }
+    if (size === lastSize) stableRounds++;
+    else {
+      stableRounds = 0;
+      lastSize = size;
+      log(`· waiting for peer download ${label}: ${formatBytes(size)}…`);
+    }
+    if (stableRounds >= 6 && size > minBytes) {
+      // Peer finished writing partial but didn't rename — claim it
+      try {
+        if (fs.existsSync(dest)) fs.unlinkSync(dest);
+        fs.renameSync(partial, dest);
+        log(`· claimed peer partial → ${dest}`);
+        return true;
+      } catch {
+        /* still locked */
+      }
+    }
+    sleep(5000);
+  }
+  console.error(`Timed out waiting for peer file: ${label}`);
+  return false;
+}
+
+/** Wait while another pip is writing into Neo's venv (do not kill). */
+function waitForPeerPip(venvPy) {
+  const venv = neoVenvDir();
+  const started = Date.now();
+  const timeoutMs = 90 * 60 * 1000;
+  while (Date.now() - started < timeoutMs) {
+    const marker = path.join(venv, ".neo-pip-busy");
+    if (fs.existsSync(marker)) {
+      let peer = 0;
+      try {
+        peer = Number(String(fs.readFileSync(marker, "utf8")).trim()) || 0;
+      } catch {
+        peer = 0;
+      }
+      if (peer && peer !== process.pid && pidAlive(peer)) {
+        log(`· peer pip in Neo venv (pid ${peer}) — waiting…`);
+        sleep(5000);
+        continue;
+      }
+      try {
+        fs.unlinkSync(marker);
+      } catch {
+        /* */
+      }
+    }
+    // Heuristic: Windows — look for pip targeting this venv via wmic is heavy; rely on lock marker.
+    void venvPy;
+    return;
+  }
+  console.error("Timed out waiting for peer pip.");
+}
+
+function withPipBusy(fn) {
+  const marker = path.join(neoVenvDir(), ".neo-pip-busy");
+  fs.mkdirSync(neoVenvDir(), { recursive: true });
+  fs.writeFileSync(marker, `${process.pid}\n`, "utf8");
+  try {
+    return fn();
+  } finally {
+    try {
+      if (Number(String(fs.readFileSync(marker, "utf8")).trim()) === process.pid) {
+        fs.unlinkSync(marker);
+      }
+    } catch {
+      /* */
+    }
+  }
 }
 
 /** Tracks overall bundle download progress across files. */
@@ -102,11 +275,9 @@ class BundleProgress {
         : `${formatBytes(fileDone)}`;
     const line = `  ${this.currentLabel}  ${fileBit}  ·  bundle ${overallPct}% (${formatBytes(overallDone)} / ${formatBytes(this.totalBytes)})`;
     if (!force && line === this.lastLine) return;
-    // throttle to ~every 1% of file or every 2MB when unknown
     if (!force && fileTot > 0) {
       const pct = filePct;
       const prev = this._lastPct ?? -1;
-      if (pct === prev && pct % 1 !== 0) return;
       if (pct === prev) return;
       this._lastPct = pct;
     } else if (!force && fileTot <= 0) {
@@ -193,26 +364,48 @@ function ensureVenv() {
   return dryRun ? py : venvPy;
 }
 
+function pyImportOk(venvPy, code) {
+  const r = spawnSync(venvPy, ["-c", code], {
+    encoding: "utf8",
+    windowsHide: true,
+  });
+  return r.status === 0;
+}
+
 function pipInstall(venvPy) {
-  const brainReq = path.join(PACKAGE_ROOT, "daemon", "requirements-brain.txt");
-  run(venvPy, ["-m", "pip", "install", "-U", "pip"]);
-  const r = run(venvPy, ["-m", "pip", "install", "-r", brainReq]);
-  if (r.status) {
-    console.error("pip install failed (network?). Will still try to download Neo model assets.");
-    console.error("Retry later: neo install   — or see README for CUDA rebuild.");
-    return false;
-  }
-  if (!skipImage) {
-    const imgReq = path.join(PACKAGE_ROOT, "daemon", "requirements-image.txt");
-    if (fs.existsSync(imgReq)) {
-      log("installing Neo Vision runtime (torch / diffusers)…");
-      const r2 = run(venvPy, ["-m", "pip", "install", "-r", imgReq]);
-      if (r2.status) {
-        console.error("Neo Vision pip deps failed — image features may need: neo install (retry)");
+  waitForPeerPip(venvPy);
+  return withPipBusy(() => {
+    const brainReq = path.join(PACKAGE_ROOT, "daemon", "requirements-brain.txt");
+    // Skip brain pip if already importable (idempotent / peer may have finished)
+    if (!pyImportOk(venvPy, "import llama_cpp, huggingface_hub")) {
+      run(venvPy, ["-m", "pip", "install", "-U", "pip"]);
+      const r = run(venvPy, ["-m", "pip", "install", "-r", brainReq]);
+      if (r.status) {
+        console.error("pip install (brain) failed (network?).");
+        return { brain: false, vision: skipImage ? true : false };
       }
+    } else {
+      log("brain runtime already importable (llama_cpp + huggingface_hub)");
     }
-  }
-  return true;
+
+    if (skipImage) return { brain: true, vision: true };
+
+    const imgReq = path.join(PACKAGE_ROOT, "daemon", "requirements-image.txt");
+    if (!fs.existsSync(imgReq)) return { brain: true, vision: false };
+
+    if (pyImportOk(venvPy, "import torch, diffusers, transformers, PIL")) {
+      log("Neo Vision runtime already importable (torch / diffusers)");
+      return { brain: true, vision: true };
+    }
+
+    log("installing Neo Vision runtime (torch / diffusers) — same terminal, may take a while…");
+    const r2 = run(venvPy, ["-m", "pip", "install", "-r", imgReq]);
+    if (r2.status) {
+      console.error("Neo Vision pip deps failed — retry: neo install");
+      return { brain: true, vision: false };
+    }
+    return { brain: true, vision: true };
+  });
 }
 
 function ggufUrl(spec) {
@@ -238,6 +431,13 @@ async function ensureGguf(key, brainPath, progress) {
     if (progress && spec.download) progress.completedBytes += spec.approx_bytes || 0;
     return dest;
   }
+
+  // Peer may be writing this file — join instead of fighting
+  if (!dryRun && waitForPeerFile(dest, { label: spec.brand, minBytes: 1_000_000 })) {
+    if (progress && spec.download) progress.completedBytes += spec.approx_bytes || 0;
+    return dest;
+  }
+
   // Migrate legacy vendor-named GGUF if present in models dir
   if (!dryRun && spec.upstream_file) {
     const legacy = path.join(neoModelsDir(), spec.upstream_file);
@@ -273,12 +473,38 @@ async function ensureImage(venvPy, progress) {
     if (progress) progress.completedBytes += spec.approx_bytes || 0;
     return dest;
   }
+
+  // Peer snapshot in progress?
+  const busy = path.join(dest, ".neo-image-busy");
+  if (!dryRun && fs.existsSync(busy)) {
+    const started = Date.now();
+    while (Date.now() - started < 90 * 60 * 1000) {
+      if (fs.existsSync(marker)) {
+        log(`· ${spec.brand} ready (peer install)`);
+        if (progress) progress.completedBytes += spec.approx_bytes || 0;
+        return dest;
+      }
+      let peer = 0;
+      try {
+        peer = Number(String(fs.readFileSync(busy, "utf8")).trim()) || 0;
+      } catch {
+        peer = 0;
+      }
+      if (peer && pidAlive(peer) && peer !== process.pid) {
+        log(`· waiting for peer Neo Vision download (pid ${peer})…`);
+        sleep(5000);
+        continue;
+      }
+      break;
+    }
+  }
+
   log(`${spec.brand} → ${dest}`);
   log(`  download ~${formatBytes(spec.approx_bytes)} (fp16 pipeline)`);
   if (dryRun) return dest;
   fs.mkdirSync(dest, { recursive: true });
+  fs.writeFileSync(busy, `${process.pid}\n`, "utf8");
   progress?.beginFile(spec.brand, spec.approx_bytes);
-  // Prefer huggingface_hub snapshot into Neo-named folder (fp16 + configs only)
   const pyCode = `
 from huggingface_hub import snapshot_download
 import os
@@ -306,11 +532,15 @@ open(os.path.join(dest, ".neo-ready"), "w").write("ok\\n")
 print(dest)
 `;
   const r = spawnSync(venvPy, ["-c", pyCode], { stdio: "inherit", windowsHide: true });
+  try {
+    fs.unlinkSync(busy);
+  } catch {
+    /* */
+  }
   if (r.status) {
-    console.error("Neo Vision download failed (optional: neo install --skip-image)");
+    console.error("Neo Vision download failed — retry: neo install   (or neo install --skip-image)");
     process.exit(r.status || 1);
   }
-  // Mark file complete in overall progress (hub shows its own bars)
   if (progress) {
     progress.currentReceived = 0;
     progress.currentTotal = 0;
@@ -332,6 +562,8 @@ function writeCfg(modelPath, coderPath, imagePath) {
     model_path: modelPath,
     coder_id: NEO_MODELS.coder.id,
     coder_path: coderPath || null,
+    plan_path: path.join(neoModelsDir(), NEO_MODELS.plan.file),
+    work_path: path.join(neoModelsDir(), NEO_MODELS.work.file),
     image_id: NEO_MODELS.image.id,
     image_path: imagePath || null,
     brain_port: prev.brain_port || DEFAULT_BRAIN_PORT,
@@ -369,17 +601,25 @@ function checkRuntime() {
   if (r.status !== 0) issues.push("llama-cpp-python not importable (run neo install)");
   else log(`llama-cpp-python ${(r.stdout || "").trim()}`);
 
+  if (!skipImage) {
+    const marker = path.join(neoModelsDir(), NEO_MODELS.image.dir, ".neo-ready");
+    if (!fs.existsSync(marker)) issues.push("Neo Vision weights missing — run neo install");
+    if (!pyImportOk(py, "import torch, diffusers")) {
+      issues.push("Neo Vision runtime (torch/diffusers) missing — run neo install");
+    }
+  }
+
   if (issues.length) {
     for (const i of issues) console.error("✗", i);
     process.exit(1);
   }
-  log("✓ neo install check passed");
+  log("✓ neo install check passed (models + runtime)");
 }
 
 function printSizePlan() {
   const plan = neoInstallSizePlan({ skipImage });
   log("");
-  log("Install size plan (approximate)");
+  log("Install size plan (approximate) — one command, same terminal");
   log("─".repeat(72));
   log(
     `${"Asset".padEnd(14)} ${"Path".padEnd(18)} ${"Download".padStart(10)} ${"Disk".padStart(10)}  Role`,
@@ -392,14 +632,13 @@ function printSizePlan() {
   }
   log("─".repeat(72));
   log(`Models download   ${formatBytes(plan.modelsDownloadBytes)}`);
-  log(`Models disk       ${formatBytes(plan.modelsDiskBytes)}  (Neo Code hardlink ≈ 0 extra)`);
+  log(`Models disk       ${formatBytes(plan.modelsDiskBytes)}  (role hardlinks ≈ 0 extra)`);
   log(`Runtime (pip)     ~${formatBytes(plan.runtimeApproxBytes)}`);
   log(`TOTAL download    ~${formatBytes(plan.totalDownloadBytes)}`);
   log(`TOTAL disk        ~${formatBytes(plan.totalDiskBytes)}`);
   log("");
-  log("Honest note: Neo Plan / Neo Code / Neo Work share one GGUF (neo-brain.gguf).");
-  log("Neo Code also installs neo-coder.gguf as a hardlink/copy of that same file.");
-  log("Neo Vision is separate image weights under models/neo-image/.");
+  log("This run installs ALL of: Brain GGUF · Plan/Code/Work aliases · Vision · pip runtimes.");
+  log("Honest note: Plan / Code / Work share one GGUF (neo-brain.gguf) via hardlinks/copies.");
   if (skipImage) log("(Neo Vision skipped via --skip-image)");
   log("");
 }
@@ -412,7 +651,7 @@ function printDryRunPlan() {
   log(`would pip install → daemon/requirements-brain.txt`);
   if (!skipImage) log(`would pip install → daemon/requirements-image.txt`);
   printSizePlan();
-  for (const key of ["brain", "coder"]) {
+  for (const key of ["brain", "coder", "plan", "work"]) {
     const s = NEO_MODELS[key];
     const dest = path.join(neoModelsDir(), s.file);
     log(`would install ${s.brand} (${s.id}) → ${dest}`);
@@ -427,9 +666,46 @@ function printDryRunPlan() {
   log(`would write config → ${path.join(neoDataRoot(), "config.json")}`);
 }
 
+function readinessReport(venvPy, imagePath, pip) {
+  const rows = [];
+  const brain = path.join(neoModelsDir(), NEO_MODELS.brain.file);
+  const okBrain = fs.existsSync(brain) && fs.statSync(brain).size > 1_000_000;
+  rows.push(["Neo Brain GGUF", okBrain ? "ready" : "MISSING"]);
+  for (const key of ["coder", "plan", "work"]) {
+    const p = path.join(neoModelsDir(), NEO_MODELS[key].file);
+    const ok = fs.existsSync(p) && fs.statSync(p).size > 1_000_000;
+    rows.push([NEO_MODELS[key].brand, ok ? "ready" : "MISSING"]);
+  }
+  const visionWeights = Boolean(imagePath && fs.existsSync(path.join(imagePath, ".neo-ready")));
+  if (!skipImage) {
+    rows.push(["Neo Vision weights", visionWeights ? "ready" : "MISSING"]);
+    rows.push([
+      "Vision runtime (torch)",
+      pip.vision && pyImportOk(venvPy, "import torch, diffusers") ? "ready" : "MISSING",
+    ]);
+  } else {
+    rows.push(["Neo Vision", "skipped (--skip-image)"]);
+  }
+  rows.push([
+    "Brain runtime (llama_cpp)",
+    pip.brain && pyImportOk(venvPy, "import llama_cpp") ? "ready" : "MISSING",
+  ]);
+
+  log("\n readiness");
+  log("─".repeat(40));
+  for (const [name, st] of rows) {
+    log(`  ${st === "ready" || st.startsWith("skipped") ? "✓" : "✗"} ${name.padEnd(28)} ${st}`);
+  }
+  log("─".repeat(40));
+
+  const requiredOk = rows.every(([, st]) => st === "ready" || st.startsWith("skipped"));
+  return requiredOk;
+}
+
 async function main() {
-  log("NEO install — full foundational bundle");
+  log("NEO install — full foundational bundle (one command · same terminal · Mac+Windows)");
   log(`data → ${neoDataRoot()}`);
+  log(`platform → ${process.platform} ${process.arch} · node ${process.version}`);
 
   if (checkOnly) {
     checkRuntime();
@@ -441,37 +717,56 @@ async function main() {
     return;
   }
 
-  printSizePlan();
-  writePackageRootMarker();
-  fs.mkdirSync(neoModelsDir(), { recursive: true });
+  const releaseLock = acquireInstallLock();
+  try {
+    printSizePlan();
+    writePackageRootMarker();
+    fs.mkdirSync(neoModelsDir(), { recursive: true });
 
-  const plan = neoInstallSizePlan({ skipImage });
-  const progress = new BundleProgress(plan.modelsDownloadBytes);
+    const plan = neoInstallSizePlan({ skipImage });
+    const progress = new BundleProgress(plan.modelsDownloadBytes);
 
-  const venvPy = ensureVenv();
-  const pipOk = pipInstall(venvPy);
-  const brainPath = await ensureGguf("brain", null, progress);
-  const coderPath = await ensureGguf("coder", brainPath, progress);
-  let imagePath = null;
-  if (!skipImage) {
-    imagePath = await ensureImage(venvPy, progress);
-  } else {
-    log("skipping Neo Vision (--skip-image)");
+    const venvPy = ensureVenv();
+    const pip = pipInstall(venvPy);
+    const brainPath = await ensureGguf("brain", null, progress);
+    const coderPath = await ensureGguf("coder", brainPath, progress);
+    await ensureGguf("plan", brainPath, progress);
+    await ensureGguf("work", brainPath, progress);
+    let imagePath = null;
+    if (!skipImage) {
+      imagePath = await ensureImage(venvPy, progress);
+    } else {
+      log("skipping Neo Vision (--skip-image)");
+    }
+    writeCfg(
+      path.resolve(brainPath),
+      path.resolve(coderPath),
+      imagePath ? path.resolve(imagePath) : null,
+    );
+
+    log("\nDone. Assets:");
+    log(`  ${NEO_MODELS.brain.brand.padEnd(12)} ${NEO_MODELS.brain.file}`);
+    log(`  ${NEO_MODELS.coder.brand.padEnd(12)} ${NEO_MODELS.coder.file}`);
+    log(`  ${NEO_MODELS.plan.brand.padEnd(12)} ${NEO_MODELS.plan.file}`);
+    log(`  ${NEO_MODELS.work.brand.padEnd(12)} ${NEO_MODELS.work.file}`);
+    if (imagePath) log(`  ${NEO_MODELS.image.brand.padEnd(12)} ${NEO_MODELS.image.dir}/`);
+
+    const ready = readinessReport(venvPy, imagePath, pip);
+    if (!ready) {
+      log("\nNeo is NOT fully ready. Re-run in this same terminal:");
+      log("  neo install");
+      process.exitCode = 1;
+      return;
+    }
+
+    log("\nNeo is ready. Next (optional):");
+    log("  neo doctor");
+    log("  neo");
+    log("\nOptional GPU: rebuild llama-cpp-python with CUDA (see README).");
+    process.exitCode = 0;
+  } finally {
+    releaseLock();
   }
-  writeCfg(path.resolve(brainPath), path.resolve(coderPath), imagePath ? path.resolve(imagePath) : null);
-
-  log("\nDone. Assets:");
-  log(`  ${NEO_MODELS.brain.brand.padEnd(12)} ${NEO_MODELS.brain.file}`);
-  log(`  ${NEO_MODELS.coder.brand.padEnd(12)} ${NEO_MODELS.coder.file}`);
-  if (imagePath) log(`  ${NEO_MODELS.image.brand.padEnd(12)} ${NEO_MODELS.image.dir}/`);
-  if (!pipOk) {
-    log("\n⚠ Brain runtime pip install did not complete — retry when PyPI is reachable.");
-    process.exitCode = 2;
-  }
-  log("\nNext:");
-  log("  neo doctor");
-  log("  neo");
-  log("\nOptional GPU: rebuild llama-cpp-python with CUDA (see README).");
 }
 
 main().catch((e) => {

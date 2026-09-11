@@ -4,90 +4,79 @@
 
 Neo runs on your machine. Conversations, tools, and its own API stay on-device. No cloud account required for core AI. Open source under MIT.
 
-## Install (simple)
+## Install
 
-Requires **Node.js 20+**. Full model bundle is about **~6.5 GB** download (run once via `neo install`).
+Requires **Node.js 20+**. One command does the full setup after the CLI is on PATH:
 
-### Works right now (recommended until npm publish)
+**`neo install`** = Brain GGUF + Plan/Code/Work aliases + Neo Vision + Python runtimes (~**6.45 GB**), progress in the **same terminal** (Mac & Windows). No extra windows.
 
-**Windows (PowerShell / CMD)** — set a writable npm prefix first (fixes WinGet Node `EPERM`/`EEXIST`):
-
-```powershell
-npm config set prefix "$env:APPDATA\npm"
-git clone https://github.com/Salazar534/neo.git
-cd neo
-npm install -g . --force
-neo install
-```
-
-**macOS / Linux:**
+### GitHub (works today)
 
 ```bash
-git clone https://github.com/Salazar534/neo.git
-cd neo
-npm install -g . --force
-neo install
+git clone https://github.com/Salazar534/neo.git && cd neo && npm install -g . && neo install
 ```
 
-One-liner alternative (HTTPS git URL — if this leaves an empty install on Windows, use the clone steps above):
+### npm (after `@node30/neo` is published)
 
 ```bash
-npm install -g https://github.com/Salazar534/neo.git --force && neo install
+npm install -g @node30/neo && neo install
 ```
 
-### From npm (after `@node30/neo` is published)
+Then: `neo doctor` · `neo`
 
-```bash
-npm install -g @node30/neo
-neo install
-```
+Same on **macOS Terminal** and **Windows PowerShell / CMD**. Details: [INSTALL.md](INSTALL.md).
 
-Then:
+If `neo` is missing, open a new terminal or run `neo repair` (from the clone: `node bin/neo.js repair`).
 
-```bash
-neo doctor
-neo
-```
-
-If `neo` is missing or Windows conflicts on `neo.cmd`:
-
-```bash
-neo repair
-```
-
-(or from the clone: `node bin/fix-path.mjs`) then open a **new** terminal.
-
-| Goal | Command |
+| | |
 |---|---|
-| **Works now** | `git clone … && cd neo && npm install -g . --force && neo install` |
-| After npm publish | `npm install -g @node30/neo && neo install` |
-| Models during npm | `NEO_INSTALL_MODELS=1 npm install -g …` |
-| Text brain only | `neo install --skip-image` |
+| Full setup (default) | `neo install` |
+| Text only | `neo install --skip-image` |
+| Size plan | `neo install --dry-run` |
 | Fix PATH / stale shims | `neo repair` |
 
-`npm install -g` installs the small CLI only. Models are **not** downloaded in postinstall by default.
+`npm install -g` installs the CLI only. Models download only when you run `neo install` (or `NEO_INSTALL_MODELS=1` during npm).
+
+## Where models live
+
+| OS | Path |
+|---|---|
+| **Windows** | `%LOCALAPPDATA%\Neo\models\` |
+| **macOS** | `~/Library/Application Support/Neo/models/` |
+| **Linux** | `~/.local/share/neo/models/` |
+
+```
+models/
+  neo-brain.gguf     # shared weights (one download)
+  neo-coder.gguf     # hardlink → Neo Code
+  neo-plan.gguf      # hardlink → Neo Plan
+  neo-work.gguf      # hardlink → Neo Work
+  neo-image/         # Neo Vision
+```
+
+Override with `NEO_HOME` if needed.
 
 ## Neo foundational models
 
 | Asset | Path | Download | Disk | Role |
 |---|---|---:|---:|---|
-| **Neo Brain** | `neo-brain.gguf` | ~1.93 GB | ~1.93 GB | Powers **Neo Plan / Neo Code / Neo Work** (one shared GGUF) |
-| **Neo Code** | `neo-coder.gguf` | ~0 | ~0* | Same weights as Neo Brain (hardlink when possible) |
+| **Neo Brain** | `neo-brain.gguf` | ~1.93 GB | ~1.93 GB | Shared GGUF for Plan / Code / Work |
+| **Neo Code** | `neo-coder.gguf` | ~0 | ~0* | Role alias of Neo Brain |
+| **Neo Plan** | `neo-plan.gguf` | ~0 | ~0* | Role alias of Neo Brain |
+| **Neo Work** | `neo-work.gguf` | ~0 | ~0* | Role alias of Neo Brain |
 | **Neo Vision** | `neo-image/` | ~2.6 GB | ~2.6 GB | Local image generation |
 | Brain runtime | `venv/` (pip) | ~0.12 GB | ~0.12 GB | llama-cpp + hub |
 | Vision runtime | `venv/` (pip) | ~1.8 GB | ~1.8 GB | torch / diffusers (skip with `--skip-image`) |
 
-\* If hardlink fails, Neo Code is a full copy (~+1.93 GB disk).
+\* If hardlink fails, each role alias is a full copy (~+1.93 GB disk).
 
 | | Approx |
 |---|---:|
-| **Total download (full)** | **~6.5 GB** |
-| **Total disk (full, hardlink OK)** | **~6.5 GB** |
+| **Total download (full)** | **~6.45 GB** |
+| **Total disk (full, hardlink OK)** | **~6.45 GB** |
 | Text only (`neo install --skip-image`) | ~2.05 GB |
 
-**Honest note:** Neo Plan, Neo Code, and Neo Work are **modes** on one Neo Brain GGUF — not three separate downloads.
-
-Data dirs: Windows `%LOCALAPPDATA%\Neo` · macOS `~/Library/Application Support/Neo` · Linux `~/.local/share/neo` (or `$XDG_DATA_HOME/neo`).
+Neo Plan / Neo Code / Neo Work are **modes** on one Neo Brain GGUF — not three separate downloads.
 
 ## Features
 
@@ -116,7 +105,7 @@ Neo is **local by default**. Core AI runs on-device. Optional network features (
 | `neo install --cpu` | Force CPU-only inference |
 | `neo install --skip-image` | Text brain only (skip Neo Vision) |
 | `neo doctor` | OS, PATH, model, GPU/CPU, daemon status |
-| `neo repair` | Clear stale `neo.cmd` / fix npm prefix PATH |
+| `neo repair` | Fix stale `neo` shims / npm global PATH |
 | `neo brain` | Run the brain daemon in the foreground |
 | `neo help` | Help |
 
