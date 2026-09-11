@@ -104,6 +104,27 @@ if ($parts -notcontains $dir) {
   log(`  Open a NEW terminal after repair so PATH refreshes.`);
 }
 
+function stripPowerShellNeoFunction() {
+  if (process.platform !== "win32") return;
+  const home = os.homedir();
+  const profiles = [
+    path.join(home, "Documents", "WindowsPowerShell", "Microsoft.PowerShell_profile.ps1"),
+    path.join(home, "Documents", "PowerShell", "Microsoft.PowerShell_profile.ps1"),
+  ];
+  for (const pf of profiles) {
+    if (!fs.existsSync(pf)) continue;
+    try {
+      let raw = fs.readFileSync(pf, "utf8");
+      if (!raw.includes("# >>> NEO")) continue;
+      raw = raw.replace(/# >>> NEO[\s\S]*?# <<< NEO\s*/g, "").trimEnd() + "\n";
+      fs.writeFileSync(pf, raw, "utf8");
+      log(`  cleaned PowerShell profile → ${pf}`);
+    } catch (e) {
+      log(`  could not clean profile ${pf}: ${e.message || e}`);
+    }
+  }
+}
+
 function main() {
   log("NEO repair — cleaning stale neo shims\n");
   let n = 0;
@@ -111,10 +132,11 @@ function main() {
     if (tryUnlink(p)) n++;
   }
   if (!n) log("  (no stale neo shims found)");
+  stripPowerShellNeoFunction();
   log("");
   ensureWindowsNpmPrefix();
   log("\nNext:");
-  log("  npm install -g github:Salazar534/neo --force");
+  log("  npm install -g https://github.com/Salazar534/neo.git --force");
   log("  neo install");
   log("  (after npm publish: npm install -g @node30/neo)");
 }

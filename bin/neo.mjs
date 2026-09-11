@@ -108,7 +108,7 @@ Usage:
 Install:
   npm install -g @node30/neo && neo install
   # until published:
-  npm install -g github:Salazar534/neo --force && neo install
+  npm install -g https://github.com/Salazar534/neo.git --force && neo install
 
 Env:
   NEO_WORKSPACE     file write root (default: cwd)

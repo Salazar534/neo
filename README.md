@@ -17,10 +17,27 @@ npm install -g @node30/neo
 neo install
 ```
 
-**From GitHub** (works worldwide today):
+**From GitHub** (works worldwide today — use HTTPS):
 
 ```bash
-npm install -g github:Salazar534/neo --force
+npm config set prefix "%APPDATA%\npm"
+npm install -g https://github.com/Salazar534/neo.git --force
+neo install
+```
+
+macOS / Linux (prefix usually already writable):
+
+```bash
+npm install -g https://github.com/Salazar534/neo.git --force
+neo install
+```
+
+**Clone fallback** (if npm git install is empty/broken):
+
+```bash
+git clone https://github.com/Salazar534/neo.git
+cd neo
+npm install -g . --force
 neo install
 ```
 
@@ -31,20 +48,21 @@ neo doctor
 neo
 ```
 
-If Windows shows `EPERM` / `EEXIST` on `neo.cmd` (common with WinGet Node):
+If Windows shows `EPERM` / `EEXIST` on `neo.cmd` (common with WinGet Node), or PowerShell runs an old `neo` function:
 
 ```bash
-npm config set prefix %APPDATA%\npm
-npm install -g github:Salazar534/neo --force
+npm config set prefix "%APPDATA%\npm"
+npm install -g https://github.com/Salazar534/neo.git --force
+neo repair
 neo install
 ```
 
-Or after any partial install: `neo repair` then re-run the GitHub install line.
+Open a **new** terminal after repair so PATH refreshes.
 
 | Goal | Command |
 |---|---|
 | Recommended (npm) | `npm install -g @node30/neo && neo install` |
-| Works now (GitHub) | `npm install -g github:Salazar534/neo --force && neo install` |
+| Works now (GitHub) | `npm install -g https://github.com/Salazar534/neo.git --force && neo install` |
 | Models during npm | `NEO_INSTALL_MODELS=1 npm install -g …` |
 | Text brain only | `neo install --skip-image` |
 | Fix PATH / stale shims | `neo repair` |
