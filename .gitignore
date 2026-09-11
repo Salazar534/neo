@@ -1,0 +1,57 @@
+# Dependencies
+node_modules/
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.Python
+
+# Models & weights (multi-GB — never commit)
+models/
+*.gguf
+*.gguf.*
+*.safetensors
+*.onnx
+*.ckpt
+*.pt
+*.bin
+*.partial
+
+# Local Neo data / caches
+.neo/
+outputs/
+workspace/
+.tmp/
+tmp-*
+*.log
+core/session_state.json
+
+# ComfyUI / image stacks if linked locally
+ComfyUI/
+comfyui/
+
+# Secrets & env
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+credentials*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+*.code-workspace
+
+# Build / coverage
+dist/
+build/
+coverage/
+.nyc_output/

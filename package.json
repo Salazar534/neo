@@ -1,0 +1,63 @@
+{
+  "name": "@node30/neo",
+  "version": "2.1.0",
+  "description": "NEO — local-first autonomous coding agent and foundational AI for your PC. Own API, tools, and conversations on-device.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Enrico",
+  "bin": {
+    "neo": "./bin/neo.mjs"
+  },
+  "files": [
+    "bin",
+    "ui",
+    "core",
+    "daemon",
+    "worker",
+    "themes",
+    "LICENSE",
+    "README.md",
+    "Modelfile.neo-brain"
+  ],
+  "scripts": {
+    "neo": "node ./bin/neo.mjs",
+    "start": "node ./bin/neo.mjs",
+    "setup": "node ./bin/setup.mjs",
+    "install-global": "node ./bin/install-global.mjs",
+    "catalog": "node ./bin/setup.mjs --catalog-only",
+    "image-daemon": "node ./bin/setup.mjs --daemon",
+    "brain": "node ./bin/neo.mjs brain",
+    "smoke": "node ./bin/smoke.mjs",
+    "test:brain-client": "node ./bin/test-brain-client.mjs",
+    "postinstall": "node ./bin/postinstall.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "neo",
+    "local-ai",
+    "agent",
+    "coding-agent",
+    "cli",
+    "privacy",
+    "on-device"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Salazar534/neo"
+  },
+  "bugs": {
+    "url": "https://github.com/Salazar534/neo/issues"
+  },
+  "homepage": "https://github.com/Salazar534/neo#readme",
+  "dependencies": {
+    "chalk": "^5.4.1",
+    "ink": "^5.2.1",
+    "ink-select-input": "^6.2.0",
+    "ink-spinner": "^5.0.0",
+    "ink-text-input": "^6.0.0",
+    "ora": "^8.2.0",
+    "react": "^18.3.1"
+  }
+}

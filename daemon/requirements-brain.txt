@@ -1,0 +1,4 @@
+# Neo brain runtime (llama.cpp via Python). CPU wheels work out of the box.
+# For NVIDIA GPU (faster): see README — rebuild llama-cpp-python with CUDA.
+llama-cpp-python>=0.3.0
+huggingface_hub>=0.23.0
