@@ -4,3 +4,6 @@
 outputs/
 *.tgz
 node_modules/
+# Legacy Windows PATH helpers — npm generates its own global shims
+bin/neo.cmd
+bin/neo.ps1

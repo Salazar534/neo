@@ -5,7 +5,7 @@
   "type": "module",
   "license": "MIT",
   "bin": {
-    "neo": "./bin/neo.mjs"
+    "neo": "./bin/neo.js"
   },
   "files": [
     "bin",
